@@ -32,10 +32,11 @@ context.
 
 **Scripts (run by the agent or in CI):**
 - **[validate_steps_script.py](validate_steps_script.py)** — lint + `--params`, see below.
-- **[report_to_pdf.py](report_to_pdf.py)** — turn a validation report (self-contained
-  HTML, or Markdown) into a PDF using whatever's installed (headless Chrome/Chromium →
-  wkhtmltopdf; pandoc for Markdown). `python report_to_pdf.py report.html report.pdf`
-  (or `--selftest`). The agent writes the report; this only handles the conversion.
+- **[report_to_pdf.py](report_to_pdf.py)** — turn a validation report (Markdown) into a
+  PDF in **pure Python via fpdf2** — no browser or system binaries; Unicode via DejaVu
+  Sans. `pip install fpdf2` once, then `python report_to_pdf.py report.md report.pdf`
+  (or `--selftest`). The agent writes the report; this only converts. If fpdf2 can't be
+  installed, the Markdown report stands on its own.
 
 ## Validation hierarchy
 
@@ -80,8 +81,11 @@ model's meaning and, finally, the outside world.
 │            → advisory suggestion + citation, not a failure           │
 └─────────────────────────────────────────────────────────────────────┘
       │
-      ▼  report_to_pdf.py report.html report.pdf
+      ▼  report_to_pdf.py report.md report.pdf   (pure-Python fpdf2)
    PDF report  (verdict · comparison tables · HARD/ADVISORY findings · sources)
+      │
+      ▼  ask the modeler before editing the script — decline ⇒ stop at the report
+   (fixes applied only with explicit approval)
 ```
 
 ## The validator script

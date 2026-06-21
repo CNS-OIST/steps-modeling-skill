@@ -228,15 +228,18 @@ modeler declines both, note that the kinetics are unvalidated and stop.
 
 For a substantial validation (a literature comparison, or a semantic review with
 several findings) — or whenever the modeler asks for a report — write it up as a file
-and offer a PDF. Don't reinvent the conversion: write a **single self-contained HTML**
-(inline CSS, no external assets) and convert with the bundled helper, which uses
-whatever's installed (headless Chrome → wkhtmltopdf; pandoc for Markdown):
+and offer a PDF. Write the report as **Markdown** (it doubles as a readable `.md`) and
+convert with the bundled helper, which renders to PDF in **pure Python via fpdf2** — no
+browser or system binaries:
 
 ```bash
-python report_to_pdf.py report.html report.pdf      # or report.md
+pip install fpdf2                                    # once
+python report_to_pdf.py report.md report.pdf
 ```
 
-Structure the report so the verdict is readable at a glance:
+It supports the usual subset (`#`/`##`/`###` headings, paragraphs, `-` bullets, pipe
+tables, `**bold**`) and Unicode (µ, M⁻¹s⁻¹, Ca²⁺, →, ✓). Structure the report so the
+verdict is readable at a glance:
 
 1. **Verdict** — one short paragraph + a tier-count table (HARD / ADVISORY / CONFIRMED).
 2. **Comparison tables** — model value | published value(s) + conditions | source | match.
@@ -249,8 +252,21 @@ Structure the report so the verdict is readable at a glance:
 
 Be honest in the report itself: mark values you couldn't independently re-fetch as
 "cited, not re-verified", and frame a suspected error as "verify" unless it's
-unambiguous (a unit/scale slip). If no HTML→PDF backend exists, the helper says so —
-leave the HTML and tell the modeler to print it.
+unambiguous (a unit/scale slip).
+
+**If fpdf2 isn't available and the modeler can't install it** (no permission, locked
+environment), don't block — the **Markdown report is the deliverable**. Hand them the
+`.md` (it's fully readable as-is) and note they can render it later with `pip install
+fpdf2 && python report_to_pdf.py report.md`. Same for any other missing tool: degrade
+to the artefact you can produce, never fail silently.
+
+### Ask before changing the model
+
+Validation **reports**; it does not edit. After presenting the findings (and the
+report), **ask the modeler for permission before modifying the script** — list the
+exact fixes you propose and wait for a yes. This applies to every tier (lint, semantic,
+literature). **If the modeler declines, stop at the report** — leave the script
+untouched. Only apply fixes you've been explicitly cleared to make.
 
 ## Maintaining this skill
 
