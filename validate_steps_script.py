@@ -83,14 +83,16 @@ def _ast_checks(tree):
         if isinstance(node, ast.Assign) and _is_create(node.value):
             cls = _create_class(node.value)
             ok_targets = all(isinstance(t, (ast.Name, ast.Tuple)) for t in node.targets)
-            single_line = getattr(node, "end_lineno", node.lineno) == node.lineno
+            # introspection reads the call's FIRST physical line — it needs
+            # `name = X.Create(` there. Arguments may wrap to later lines (fine); only
+            # flag when the assignment and the `.Create(` start on different lines.
+            same_start = node.value.lineno == node.lineno
             if ok_targets and not in_loop_or_comp(node.value):
                 good.add(node.value)
-                if not single_line:
+                if not same_start:
                     out.append(("WARNING", node.lineno,
-                                ".Create() spans multiple lines",
-                                f"keep the whole `name = {cls}.Create(...)` on one line "
-                                "(it reads the source line for the name)"))
+                                "`.Create()` starts on a different line from its assignment",
+                                f"put `name = {cls}.Create(` on one line (args may then wrap)"))
             if cls == "Species":
                 for t in node.targets:
                     for e in (t.elts if isinstance(t, ast.Tuple) else [t]):
@@ -175,9 +177,9 @@ def _scale_checks(tree):
                     elif 0 < v < 1e-11:
                         out.append(("WARNING", node.lineno, f"Conc {v:g} M is below ~10 pM",
                                     "check units — Conc is mol/L, not mol/m³"))
-                    elif v <= 0:
-                        out.append(("WARNING", node.lineno, f"Conc {v:g} M is non-positive",
-                                    "set a positive molar concentration"))
+                    elif v < 0:
+                        out.append(("WARNING", node.lineno, f"Conc {v:g} M is negative",
+                                    "set a non-negative molar concentration (0 clears the species)"))
         if isinstance(node, ast.Call):
             fn = node.func.attr if isinstance(node.func, ast.Attribute) else \
                 (node.func.id if isinstance(node.func, ast.Name) else "")
@@ -226,6 +228,11 @@ def _selftest():
         assert any(needle in m for m in msgs), f"self-test missed: {needle}"
     assert all(len(t) == 4 for t in validate_source(bad)), "issues must carry a fix"
     assert not validate_source("import steps.interface\nfrom steps.model import *\nx = 1\n")
+    # regression: wrapped Create() args and Conc = 0 are valid, not warnings
+    ok = ("import steps.interface\nfrom steps.model import *\n"
+          "rate = VDepRate.Create(\n    lambda V: V)\n"   # args wrap to next line
+          "sim.cyto.Fluo.Conc = 0.0\n")                   # zeroing a species is fine
+    assert validate_source(ok) == [], f"false positive(s): {validate_source(ok)}"
     print("selftest OK")
 
 
