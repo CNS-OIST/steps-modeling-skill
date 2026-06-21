@@ -243,6 +243,7 @@ def render_markdown(md, out):
         for b in bullets:
             para("•  " + b, tw - 3, 4.5, 9, x=tx + 3)
         pdf.set_y(y0 + total + 2.2)
+        pdf.set_fill_color(255, 255, 255); pdf.set_text_color(0, 0, 0)   # don't leak accent
 
     lines = md.splitlines()
     i, n = 0, len(lines)
@@ -290,6 +291,8 @@ def render_markdown(md, out):
             rows = [r for r in rows if not _is_sep(r)]
             if rows:
                 pdf.set_font(fam, size=8.4)
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_fill_color(247, 249, 251)        # zebra; also guards against any leaked fill
                 with pdf.table(markdown=True, first_row_as_headings=True, line_height=4.6,
                                padding=1.2, cell_fill_color=(247, 249, 251),
                                cell_fill_mode="EVEN_ROWS",
