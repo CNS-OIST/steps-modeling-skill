@@ -174,6 +174,56 @@ pass/fail.
 When the semantic read turns up a *new* class of bug that's statically detectable, add
 a check for it (next section) so the next script is caught automatically.
 
+## Validate against the literature
+
+A STEPS model is only as good as its kinetics, but a model is usually assembled from
+**several publications**, and their parameters legitimately disagree — different
+species, temperatures, prep, and lab protocols all move a rate constant. So this pass
+is **mostly advisory: surface context and suggestions, not a pass/fail verdict.** Do
+not treat "differs from paper X" as an error. After the static + semantic passes,
+dump what the model actually encodes:
+
+```bash
+python validate_steps_script.py --params model.py
+```
+
+This prints the reaction schemes, every `r[..].K`, `Diffusion(...)` constant, and
+initial `Conc`/`Count` — the list you line up against the source(s). Separate findings
+into two tiers:
+
+**Hard issues (flag as real problems with a fix).** These are wrong regardless of which
+lab the number came from:
+- **unit / scale errors** — the #1 trap. STEPS is SI-with-molar (M⁻¹·s⁻¹, s⁻¹, m²/s,
+  volts); papers quote µM⁻¹·s⁻¹, mV, ms⁻¹, µm²/s. A value that's 1e3/1e6/1e9 off a
+  cited number, or outside the physical envelope (kon ≫ ~1e10 M⁻¹·s⁻¹ diffusion limit,
+  D outside ~1e-13–1e-9 m²/s), is almost certainly a conversion bug. See the crib in
+  [reference.md](reference.md);
+- **wrong stoichiometry** or missing cooperative factors (two equivalent sites →
+  `2·kon` / `2·koff`); reaction order that doesn't match the scheme;
+- missing / extra reactions versus the cited mechanism.
+
+**Advisory (suggestions, not failures).** Present these for the modeler to judge:
+- a rate / concentration / D that sits within plausible biological spread of the
+  cited values — note the model's choice and the published range, don't "correct" it;
+- values drawn from a different species/temperature/prep than the model targets — flag
+  the mismatch in conditions, let the modeler decide;
+- when sources disagree, report the **range and each value's conditions/citation**
+  rather than forcing one number.
+
+Write it up as a table (model value | published value(s) + conditions/source |
+unit-normalised | **hard issue vs suggestion**). Only hard issues get a
+problem + fix + severity like the semantic review; the rest are framed as "consider /
+note", with the citation for every published value.
+
+**No publication is provided** — do *not* silently search. First **ask the modeler
+if they can provide the publication(s)** the model is based on (often more than one).
+If they can, use them. If they can't, **ask permission to web-search** the literature
+for the pathway's kinetics/parameters. Only on a yes: `WebSearch` the pathway + rate
+constants, `WebFetch` a few authoritative sources (prefer the primary modelling papers
+or a curated DB), extract the published values **with their experimental conditions**,
+and run the same two-tier comparison — **citing the URL/DOI for every value**. If the
+modeler declines both, note that the kinetics are unvalidated and stop.
+
 ## Maintaining this skill
 
 When you hit a STEPS scripting error this skill didn't prevent, **extend it in the
