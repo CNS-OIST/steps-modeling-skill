@@ -33,6 +33,50 @@ context.
 **Script (run by the agent or in CI):**
 - **[validate_steps_script.py](validate_steps_script.py)** — see below.
 
+## Validation hierarchy
+
+The skill validates a model in three tiers, cheap-and-mechanical first, each gating
+the next. Earlier tiers are certain and automatable; later ones need a read of the
+model's meaning and, finally, the outside world.
+
+```
+   model.py
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. STATIC LINT          validate_steps_script.py model.py            │
+│    mechanical · AST+regex · no execution · CI-gateable               │
+│    import order, API_1↔2 mixing, .Create() misuse, reserved names,   │
+│    units/scale (Conc molar, D in m²/s, mesh scale=), run ordering,   │
+│    unset rates, + statically-detectable semantic traps               │
+│    → ERROR / WARNING, each with a concrete fix                       │
+└─────────────────────────────────────────────────────────────────────┘
+      │  passes
+      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. SEMANTIC REVIEW      agent walks SKILL.md checklist               │
+│    needs the model's *meaning* · not mechanical                      │
+│    loop-variable scoping, rate magnitude vs intent, units inside     │
+│    custom rate fns, clamped species, stoichiometry/cooperativity,    │
+│    geometry selection, mesh-side coverage                            │
+│    → problem + fix + severity report                                 │
+└─────────────────────────────────────────────────────────────────────┘
+      │  passes
+      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. LITERATURE VALIDATION   validate_steps_script.py --params + paper │
+│    is the science right? · judgment, not pass/fail                   │
+│                                                                       │
+│      paper provided ──► compare reactions/rates/D/initial-conc       │
+│      none ──► ask modeler for paper(s) ──► else ask to web-search    │
+│                                                                       │
+│    two tiers of finding:                                             │
+│      HARD  unit/scale error, wrong stoichiometry, missing reaction   │
+│      SOFT  values that legitimately differ (species/temp/prep/lab)   │
+│            → advisory suggestion + citation, not a failure           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
 ## The validator script
 
 Pure-Python, no execution of the model and **STEPS not required** (AST + regex only),
