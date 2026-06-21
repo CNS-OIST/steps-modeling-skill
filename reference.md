@@ -191,3 +191,5 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | counts stay 0 | rate too low / wrong units (`Conc` is molar) / no reactant at surface | raise `K`/`Count`; check SI + molar |
 | mixing APIs errors | API_1 and API_2 in one script | pick one; API_2 needs `import steps.interface` first |
 | aggregation reads only the last element (silent) | comprehension's first iterable uses a name bound by a later `for` (`(t for t in m.tets for m in mitos)`) | reorder: `for m in mitos for t in m.tets` |
+| boundary tris/tets selection comes out empty/wrong | exact float `==`/`in` on geometry (`tri.center.y in [bbox.max.y]`) never matches | tolerance `abs(a-b) < eps` or half-space `tri.center.y >= z0` |
+| geometry setup is O(n²) / a list is recomputed | a `for x in seq:` whose body ignores `x` and rebuilds a comprehension over `seq` | drop the stray loop; compute the comprehension once |

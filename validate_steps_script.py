@@ -222,6 +222,70 @@ def _comprehension_checks(tree):
     return out
 
 
+def _loop_checks(tree):
+    """A `for X in ...:` whose body never uses X *and* shadows it with an inner
+    comprehension that rebinds X — the body recomputes the same result every
+    iteration (O(n²) and a stray loop). Found in real STEPS geometry setup."""
+    out = []
+    comps = (ast.GeneratorExp, ast.ListComp, ast.SetComp, ast.DictComp)
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.For) and isinstance(node.target, ast.Name)):
+            continue
+        t = node.target.id
+        shadowed = [c for stmt in node.body for c in ast.walk(stmt)
+                    if isinstance(c, comps)
+                    and any(isinstance(g.target, ast.Name) and g.target.id == t
+                            for g in c.generators)]
+        if not shadowed:
+            continue
+        # is t Loaded anywhere in the body OUTSIDE a comprehension that rebinds it?
+        used = [False]
+        def rec(n):
+            if isinstance(n, comps) and any(isinstance(g.target, ast.Name)
+                                            and g.target.id == t for g in n.generators):
+                return  # t is a separate variable inside this comprehension — skip
+            if isinstance(n, ast.Name) and n.id == t and isinstance(n.ctx, ast.Load):
+                used[0] = True
+            for c in ast.iter_child_nodes(n):
+                rec(c)
+        for stmt in node.body:
+            rec(stmt)
+        if not used[0]:
+            out.append(("WARNING", node.lineno,
+                        f"loop variable '{t}' is unused in the body and shadowed by an inner "
+                        "comprehension — the loop recomputes the same result each iteration",
+                        "drop the stray `for` loop (compute the comprehension once), or use the "
+                        "loop variable"))
+    return out
+
+
+def _geometry_checks(tree):
+    """Exact float (in)equality on mesh geometry (`.center`, `.bbox`, `.Pos`) rarely
+    matches — a classic STEPS trap when picking boundary tris/tets. Use a tolerance or
+    a half-space test (`<=`/`>=`)."""
+    out, GEO = [], {"center", "bbox", "Pos"}
+    eq_ops = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
+
+    def is_geo_coord(o):
+        # o is *directly* a coordinate access (tri.center.y, m.bbox.max.y, v.Pos) —
+        # NOT a reduction like len(x.center) or norm(a-b), which compare scalars.
+        while isinstance(o, ast.Attribute):
+            if o.attr in GEO:
+                return True
+            o = o.value
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare) and any(isinstance(o, eq_ops) for o in node.ops):
+            operands = [node.left, *node.comparators]
+            if any(is_geo_coord(o) for o in operands):
+                out.append(("WARNING", node.lineno,
+                            "exact float (in)equality on mesh geometry (center/bbox/Pos) "
+                            "rarely matches — boundary selection silently misses",
+                            "use a tolerance `abs(a-b) < eps` or a half-space test `<=`/`>=`"))
+    return out
+
+
 def validate_source(src):
     try:
         tree = ast.parse(src)
@@ -229,7 +293,8 @@ def validate_source(src):
         return [("ERROR", e.lineno or 0, f"syntax error: {e.msg}", "fix the syntax error")]
     lines = src.splitlines()
     issues = (_import_checks(lines) + _ast_checks(tree) + _flow_checks(lines)
-              + _reaction_checks(src) + _scale_checks(tree) + _comprehension_checks(tree))
+              + _reaction_checks(src) + _scale_checks(tree) + _comprehension_checks(tree)
+              + _loop_checks(tree) + _geometry_checks(tree))
     return sorted(issues, key=lambda x: (x[1], x[0]))
 
 
@@ -260,6 +325,15 @@ def _selftest():
     # comprehension loop-variable-ordering trap (the mito_tet_lst bug)
     comp = validate_source("ts = TetList(t for t in m.tets for m in mitos)\n")
     assert any("stale value" in p for _, _, p, _ in comp), "comprehension-order check"
+    # stray loop: unused target shadowed by an inner comprehension
+    loop = validate_source("for tri in memb:\n    a = [tri for tri in memb if tri.x]\n")
+    assert any("recomputes the same result" in p for _, _, p, _ in loop), "stray-loop check"
+    # geometry float equality
+    geo = validate_source("xs = [t for t in surf if t.center.y not in ends]\n")
+    assert any("rarely matches" in p for _, _, p, _ in geo), "geometry-equality check"
+    # half-space test must NOT trip the geometry check
+    assert not any("rarely matches" in p for _, _, p, _ in
+                   validate_source("xs = [t for t in surf if t.center.y <= 0]\n")), "geo false-positive"
     print("selftest OK")
 
 

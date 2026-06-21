@@ -164,6 +164,10 @@ pass/fail.
   (2·kon / 2·koff for two equivalent sites); reversible `<r[..]>` takes `(kf, kb)`.
 - **Initialised vs declared** — every Species/Complex meant to start non-zero needs a
   `Count`/`Conc`; species that are only ever products are fine at 0.
+- **Geometry selection** — picking boundary tris/tets by comparing `.center`/`.bbox`
+  with `==`/`in` silently misses (float equality); use a tolerance or a half-space
+  (`<=`/`>=`). Watch for a stray `for x in seq:` that ignores `x` and rebuilds a
+  comprehension over `seq` (O(n²), recomputed identically). The validator flags both.
 - **Mesh side** — did every input body become a compartment? Tiny bodies below the
   element size (or collapsed by a resolver wall-shift) can silently drop.
 
