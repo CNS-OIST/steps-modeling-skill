@@ -224,6 +224,34 @@ or a curated DB), extract the published values **with their experimental conditi
 and run the same two-tier comparison — **citing the URL/DOI for every value**. If the
 modeler declines both, note that the kinetics are unvalidated and stop.
 
+### Generate a report
+
+For a substantial validation (a literature comparison, or a semantic review with
+several findings) — or whenever the modeler asks for a report — write it up as a file
+and offer a PDF. Don't reinvent the conversion: write a **single self-contained HTML**
+(inline CSS, no external assets) and convert with the bundled helper, which uses
+whatever's installed (headless Chrome → wkhtmltopdf; pandoc for Markdown):
+
+```bash
+python report_to_pdf.py report.html report.pdf      # or report.md
+```
+
+Structure the report so the verdict is readable at a glance:
+
+1. **Verdict** — one short paragraph + a tier-count table (HARD / ADVISORY / CONFIRMED).
+2. **Comparison tables** — model value | published value(s) + conditions | source | match.
+3. **Findings** — HARD issues as problem + fix + severity; ADVISORY as "consider / note".
+   Keep the two-tier split from the literature pass (hard = wrong regardless of source;
+   advisory = legitimate species/protocol differences).
+4. **Static + semantic carry-over** — any lint/semantic findings, so the report is the
+   single artefact.
+5. **Sources** — every cited value's URL/DOI.
+
+Be honest in the report itself: mark values you couldn't independently re-fetch as
+"cited, not re-verified", and frame a suspected error as "verify" unless it's
+unambiguous (a unit/scale slip). If no HTML→PDF backend exists, the helper says so —
+leave the HTML and tell the modeler to print it.
+
 ## Maintaining this skill
 
 When you hit a STEPS scripting error this skill didn't prevent, **extend it in the

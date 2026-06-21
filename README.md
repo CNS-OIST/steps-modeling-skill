@@ -30,8 +30,12 @@ context.
 - **[templates/spatial_tetexact.py](templates/spatial_tetexact.py)** — spatial
   tetrahedral-mesh template (compartment + membrane patch + diffusion + surface pump).
 
-**Script (run by the agent or in CI):**
-- **[validate_steps_script.py](validate_steps_script.py)** — see below.
+**Scripts (run by the agent or in CI):**
+- **[validate_steps_script.py](validate_steps_script.py)** — lint + `--params`, see below.
+- **[report_to_pdf.py](report_to_pdf.py)** — turn a validation report (self-contained
+  HTML, or Markdown) into a PDF using whatever's installed (headless Chrome/Chromium →
+  wkhtmltopdf; pandoc for Markdown). `python report_to_pdf.py report.html report.pdf`
+  (or `--selftest`). The agent writes the report; this only handles the conversion.
 
 ## Validation hierarchy
 
@@ -75,6 +79,9 @@ model's meaning and, finally, the outside world.
 │      SOFT  values that legitimately differ (species/temp/prep/lab)   │
 │            → advisory suggestion + citation, not a failure           │
 └─────────────────────────────────────────────────────────────────────┘
+      │
+      ▼  report_to_pdf.py report.html report.pdf
+   PDF report  (verdict · comparison tables · HARD/ADVISORY findings · sources)
 ```
 
 ## The validator script
