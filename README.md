@@ -21,6 +21,11 @@ first-class skill and with **any other AI agent** as reference context.
   (`A + B <-> C`, recorded with a ResultSelector).
 - **[templates/spatial_tetexact.py](templates/spatial_tetexact.py)** — spatial
   tetrahedral-mesh template (compartment + membrane patch + diffusion + surface pump).
+- **[validate_steps_script.py](validate_steps_script.py)** — static validator: lints a
+  STEPS script for the cardinal-rule pitfalls + unit/biological-scale sanity (Conc
+  molar, Diffusion m²/s, mesh `scale=`) and prints a **fix** for each issue. No
+  execution, STEPS not required. `python validate_steps_script.py model.py` (or
+  `--selftest`).
 
 Both templates are verified against STEPS 5.1.0.
 

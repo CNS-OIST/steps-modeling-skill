@@ -124,6 +124,29 @@ sim.run(1.0)
 print(caConc.data[0, -1], 'at t =', caConc.time[0, -1])
 ```
 
+## Validate a script
+
+Before running a STEPS script, lint it for the pitfalls above — no execution, STEPS
+not required:
+
+```bash
+python validate_steps_script.py model.py
+```
+
+It reports each issue with a concrete **fix**: import order / API_1↔API_2 mixing,
+`.Create()` misuse (loops, no assignment), reserved Species names, **units &
+biological scale** (Conc is molar, Diffusion in m²/s, mesh `scale=`),
+newRun/toSave/run ordering, and reaction rates declared but never set. Exit code is
+non-zero on ERRORs (so it fits a pre-run / CI gate); `--selftest` checks the checker.
+
+## Maintaining this skill
+
+When you hit a STEPS scripting error this skill didn't prevent, **extend it in the
+same change**: add a check (with a self-test case) to `validate_steps_script.py`, and
+record the trap in the cardinal rules above, the `reference.md` common-errors table,
+and the debugging checklist below. Keep the validator and the docs in sync — the
+validator should catch every documented gotcha.
+
 ## Debugging checklist
 
 - `Assertion Fail: i < 4` at solver setup → a surface triangle appears as **two
