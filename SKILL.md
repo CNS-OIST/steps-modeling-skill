@@ -174,6 +174,110 @@ pass/fail.
 When the semantic read turns up a *new* class of bug that's statically detectable, add
 a check for it (next section) so the next script is caught automatically.
 
+## Validate against the literature
+
+A STEPS model is only as good as its kinetics, but a model is usually assembled from
+**several publications**, and their parameters legitimately disagree — different
+species, temperatures, prep, and lab protocols all move a rate constant. So this pass
+is **mostly advisory: surface context and suggestions, not a pass/fail verdict.** Do
+not treat "differs from paper X" as an error. After the static + semantic passes,
+dump what the model actually encodes:
+
+```bash
+python validate_steps_script.py --params model.py
+```
+
+This prints the reaction schemes, every `r[..].K`, `Diffusion(...)` constant, and
+initial `Conc`/`Count` — the list you line up against the source(s). Separate findings
+into two tiers:
+
+**Hard issues (flag as real problems with a fix).** These are wrong regardless of which
+lab the number came from:
+- **unit / scale errors** — the #1 trap. STEPS is SI-with-molar (M⁻¹·s⁻¹, s⁻¹, m²/s,
+  volts); papers quote µM⁻¹·s⁻¹, mV, ms⁻¹, µm²/s. A value that's 1e3/1e6/1e9 off a
+  cited number, or outside the physical envelope (kon ≫ ~1e10 M⁻¹·s⁻¹ diffusion limit,
+  D outside ~1e-13–1e-9 m²/s), is almost certainly a conversion bug. See the crib in
+  [reference.md](reference.md);
+- **wrong stoichiometry** or missing cooperative factors (two equivalent sites →
+  `2·kon` / `2·koff`); reaction order that doesn't match the scheme;
+- missing / extra reactions versus the cited mechanism.
+
+**Advisory (suggestions, not failures).** Present these for the modeler to judge:
+- a rate / concentration / D that sits within plausible biological spread of the
+  cited values — note the model's choice and the published range, don't "correct" it;
+- values drawn from a different species/temperature/prep than the model targets — flag
+  the mismatch in conditions, let the modeler decide;
+- when sources disagree, report the **range and each value's conditions/citation**
+  rather than forcing one number.
+
+Write it up as a table (model value | published value(s) + conditions/source |
+unit-normalised | **hard issue vs suggestion**). Only hard issues get a
+problem + fix + severity like the semantic review; the rest are framed as "consider /
+note", with the citation for every published value.
+
+**No publication is provided** — do *not* silently search. First **ask the modeler
+if they can provide the publication(s)** the model is based on (often more than one).
+If they can, use them. If they can't, **ask permission to web-search** the literature
+for the pathway's kinetics/parameters. Only on a yes: `WebSearch` the pathway + rate
+constants, `WebFetch` a few authoritative sources (prefer the primary modelling papers
+or a curated DB), extract the published values **with their experimental conditions**,
+and run the same two-tier comparison — **citing the URL/DOI for every value**. If the
+modeler declines both, note that the kinetics are unvalidated and stop.
+
+### Generate a report
+
+For a substantial validation (a literature comparison, or a semantic review with
+several findings) — or whenever the modeler asks for a report — write it up as a file
+and offer a PDF. Write the report as **Markdown** (it doubles as a readable `.md`) and
+convert with the bundled helper, which renders to PDF in **pure Python via fpdf2** — no
+browser or system binaries:
+
+```bash
+pip install fpdf2                                    # once
+python report_to_pdf.py report.md report.pdf
+```
+
+The helper picks the best renderer available: a **browser** (Chrome/Chromium/Edge) +
+the `markdown` module → styled HTML → PDF; else **fpdf2** → pure-Python PDF; else it
+leaves the `.md` as the report. You write Markdown once; the environment decides the
+output. It supports the usual subset (`#`/`##`/`###` headings, paragraphs, `-` bullets,
+pipe tables, `**bold**`) and Unicode (µ, M⁻¹s⁻¹, Ca²⁺, →, ✓).
+
+**Skip report generation under CI / non-interactive automation.** A report is for a
+human; in CI there's no one to read it, hand fixes to, or grant permission. There, run
+**only the static lint** as the exit-code gate (`validate_steps_script.py model.py`) and
+skip the report, the literature web-search, and the permission prompts — they're all
+interactive steps. (Detect automation the usual way, e.g. a `CI` env var or no TTY.)
+
+Structure the report so the verdict is readable at a glance:
+
+1. **Verdict** — one short paragraph + a tier-count table (HARD / ADVISORY / CONFIRMED).
+2. **Comparison tables** — model value | published value(s) + conditions | source | match.
+3. **Findings** — HARD issues as problem + fix + severity; ADVISORY as "consider / note".
+   Keep the two-tier split from the literature pass (hard = wrong regardless of source;
+   advisory = legitimate species/protocol differences).
+4. **Static + semantic carry-over** — any lint/semantic findings, so the report is the
+   single artefact.
+5. **Sources** — every cited value's URL/DOI.
+
+Be honest in the report itself: mark values you couldn't independently re-fetch as
+"cited, not re-verified", and frame a suspected error as "verify" unless it's
+unambiguous (a unit/scale slip).
+
+**If fpdf2 isn't available and the modeler can't install it** (no permission, locked
+environment), don't block — the **Markdown report is the deliverable**. Hand them the
+`.md` (it's fully readable as-is) and note they can render it later with `pip install
+fpdf2 && python report_to_pdf.py report.md`. Same for any other missing tool: degrade
+to the artefact you can produce, never fail silently.
+
+### Ask before changing the model
+
+Validation **reports**; it does not edit. After presenting the findings (and the
+report), **ask the modeler for permission before modifying the script** — list the
+exact fixes you propose and wait for a yes. This applies to every tier (lint, semantic,
+literature). **If the modeler declines, stop at the report** — leave the script
+untouched. Only apply fixes you've been explicitly cleared to make.
+
 ## Maintaining this skill
 
 When you hit a STEPS scripting error this skill didn't prevent, **extend it in the

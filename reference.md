@@ -193,3 +193,22 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | aggregation reads only the last element (silent) | comprehension's first iterable uses a name bound by a later `for` (`(t for t in m.tets for m in mitos)`) | reorder: `for m in mitos for t in m.tets` |
 | boundary tris/tets selection comes out empty/wrong | exact float `==`/`in` on geometry (`tri.center.y in [bbox.max.y]`) never matches | tolerance `abs(a-b) < eps` or half-space `tri.center.y >= z0` |
 | geometry setup is O(n²) / a list is recomputed | a `for x in seq:` whose body ignores `x` and rebuilds a comprehension over `seq` | drop the stray loop; compute the comprehension once |
+
+## Literature units → STEPS (SI + molar)
+
+When comparing a model to a paper (`--params` dump + SKILL.md → "Validate against the
+literature"), papers rarely use STEPS units. Convert before judging a mismatch:
+
+| Quantity | Paper often uses | STEPS wants | Multiply by |
+|---|---|---|---|
+| 2nd-order rate (kon) | µM⁻¹·s⁻¹ | M⁻¹·s⁻¹ | ×1e6 |
+| 2nd-order rate (kon) | nM⁻¹·s⁻¹ | M⁻¹·s⁻¹ | ×1e9 |
+| 1st-order rate (koff, kcat) | ms⁻¹ | s⁻¹ | ×1e3 |
+| 1st-order rate | min⁻¹ | s⁻¹ | ÷60 |
+| concentration | µM / nM | M (`Conc`) | ×1e-6 / ×1e-9 |
+| diffusion constant | µm²/s | m²/s | ×1e-12 |
+| voltage (in custom rate fns) | mV | V | ×1e-3 |
+| length | µm / nm | m | ×1e-6 / ×1e-9 |
+
+Quick sanity: a diffusion-limited kon is ~1e8–1e9 M⁻¹·s⁻¹; cytosolic D ≈ 1e-13–1e-9 m²/s
+(small ion ~2e-10, protein ~1e-11). Anything far outside is a unit error, not biology.

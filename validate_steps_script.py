@@ -286,6 +286,129 @@ def _geometry_checks(tree):
     return out
 
 
+def _const_num(node):
+    """Safe-eval a purely numeric expression AST (literals + + - * / ** and unary -).
+    Real models write rates as e.g. `K_PP2A = 0.6 / 7.8e-6` — resolve those."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = _const_num(node.operand)
+        return None if v is None else -v
+    if isinstance(node, ast.BinOp):
+        a, b = _const_num(node.left), _const_num(node.right)
+        if a is None or b is None:
+            return None
+        op = node.op
+        if isinstance(op, ast.Add):  return a + b
+        if isinstance(op, ast.Sub):  return a - b
+        if isinstance(op, ast.Mult): return a * b
+        if isinstance(op, ast.Div):  return a / b if b else None
+        if isinstance(op, ast.Pow):  return a ** b
+    return None
+
+
+def _unquote(idx):
+    """`'bind'` → `bind`; a variable/f-string index (`name`, `f'grip_{z}'`) is left as-is."""
+    s = idx.strip()
+    m = re.fullmatch(r"['\"](\w+)['\"]", s)
+    return m.group(1) if m else s
+
+
+def _comment_on(lines, end_lineno):
+    raw = lines[end_lineno - 1] if 0 < end_lineno <= len(lines) else ""
+    return raw.split("#", 1)[1].strip() if "#" in raw else ""
+
+
+def extract_params(src):
+    """Pull the model's kinetic content into a structured table so it can be compared
+    against a publication / the literature (see SKILL.md → "Validate against the
+    literature"). Surfaces what to check; does not run the model. Returns a dict of
+    lists: schemes, rates, diffusions, inits, constants.
+
+    Real STEPS models are data-driven — reactions built in helpers from *named*
+    constants (`KON_GRIP = 5.5e6`) and dicts (`CONC = {...}`), not literal
+    `r['x'].K = 1e6` lines. So the workhorse is `constants`: module-level numeric
+    assignments (incl. tuple-unpacking and dict literals) with their inline comments,
+    which is where the parameters — and often their citations — actually live."""
+    lines = src.splitlines()
+    schemes, rates, diffs, inits = [], [], [], []
+    for i, raw in enumerate(lines, 1):
+        code = raw.split("#", 1)[0]
+        comment = raw.split("#", 1)[1].strip() if "#" in raw else ""
+        # reaction scheme: `... <r[..]> ...` / `... >r[..]> ...` (any index, then `>`)
+        if (m := re.search(r"r\[([^\]]+)\]\s*>", code)):
+            schemes.append((i, _unquote(m.group(1)), code.strip()))
+        # rate constant assignment: r[..].K = <expr>  (index may be a variable/f-string)
+        if (m := re.search(r"\br\[([^\]]+)\]\s*\.\s*K\b\s*=\s*(.+)", code)):
+            rates.append((i, _unquote(m.group(1)), m.group(2).strip(), comment))
+        # diffusion constant: Diffusion(Spec, D, ...)
+        if (m := re.search(r"\bDiffusion\(\s*(\w+)\s*,\s*([^,)]+?)\s*[,)]", code)):
+            diffs.append((i, m.group(1), m.group(2).strip(), comment))
+        # initial condition: <handle>.<...>.(Conc|Count) = <expr>  (handle may be aliased)
+        if (m := re.search(r"\b([A-Za-z_]\w*(?:\.\w+)+)\.(Conc|Count)\s*=\s*(.+)", code)):
+            inits.append((i, m.group(1), m.group(2), m.group(3).strip()))
+
+    constants = []
+    try:
+        tree = ast.parse(src)
+        for node in tree.body:                       # module level only
+            if not isinstance(node, ast.Assign):
+                continue
+            note = _comment_on(lines, node.end_lineno or node.lineno)
+            val = node.value
+            # dict literal: CONC = {'GRIP': 1.1e-6, ...}
+            if isinstance(val, ast.Dict) and isinstance(node.targets[0], ast.Name):
+                dname = node.targets[0].id
+                for k, v in zip(val.keys, val.values):
+                    num = _const_num(v)
+                    key = k.value if isinstance(k, ast.Constant) else "?"
+                    if num is not None or isinstance(k, ast.Constant):
+                        constants.append((node.lineno, f"{dname}['{key}']", num, note))
+                continue
+            names = node.targets[0]
+            # tuple unpack: KON_GRIP, KOFF_GRIP = 5.5e6, 0.3
+            if isinstance(names, ast.Tuple) and isinstance(val, ast.Tuple) \
+                    and len(names.elts) == len(val.elts):
+                for n, v in zip(names.elts, val.elts):
+                    num = _const_num(v)
+                    if isinstance(n, ast.Name) and num is not None:
+                        constants.append((node.lineno, n.id, num, note))
+            elif isinstance(names, ast.Name) and (num := _const_num(val)) is not None:
+                constants.append((node.lineno, names.id, num, note))
+    except SyntaxError:
+        pass
+    return {"schemes": schemes, "rates": rates, "diffusions": diffs,
+            "inits": inits, "constants": constants}
+
+
+def print_params(path):
+    p = extract_params(pathlib.Path(path).read_text())
+    print(f"\n{path} — extracted kinetic parameters (compare against the source/literature)")
+    if p["constants"]:
+        print("\n  Numeric constants (rates/concentrations live here in data-driven models):")
+        for i, name, num, note in p["constants"]:
+            shown = f"{num:g}" if num is not None else "?"
+            print(f"    L{i:<4} {name:<22} = {shown}" + (f"   # {note}" if note else ""))
+    if p["schemes"]:
+        print("\n  Reaction schemes:")
+        for i, key, txt in p["schemes"]:
+            print(f"    L{i:<4} [{key}]  {txt}")
+    if p["rates"]:
+        print("\n  Rate-constant assignments (r[..].K) — 1/s (1st order), 1/(M·s) (2nd order):")
+        for i, key, val, note in p["rates"]:
+            print(f"    L{i:<4} {key:<18} = {val}" + (f"   # {note}" if note else ""))
+    if p["diffusions"]:
+        print("\n  Diffusion constants (m²/s):")
+        for i, spec, d, note in p["diffusions"]:
+            print(f"    L{i:<4} {spec:<14} D = {d}" + (f"   # {note}" if note else ""))
+    if p["inits"]:
+        print("\n  Initial conditions (Conc = molar / Count = molecules):")
+        for i, sp, kind, val in p["inits"]:
+            print(f"    L{i:<4} {sp}.{kind} = {val}")
+    if not any(p.values()):
+        print("  (no reactions, rates, diffusions, constants, or initial conditions found)")
+
+
 def validate_source(src):
     try:
         tree = ast.parse(src)
@@ -334,14 +457,45 @@ def _selftest():
     # half-space test must NOT trip the geometry check
     assert not any("rarely matches" in p for _, _, p, _ in
                    validate_source("xs = [t for t in surf if t.center.y <= 0]\n")), "geo false-positive"
+    # --params extraction picks up scheme, rate, diffusion, and initial condition
+    pp = extract_params("A + B <r['bind']> C\nr['bind'].K = 1e6, 0.7  # Smith 2020\n"
+                        "Diffusion(Ca, 2e-10)\nsim.cyt.Ca.Conc = 150e-6\n")
+    assert [s[1] for s in pp["schemes"]] == ["bind"], pp["schemes"]
+    assert pp["rates"][0][1:3] == ("bind", "1e6, 0.7") and pp["rates"][0][3] == "Smith 2020"
+    assert pp["diffusions"][0][1:3] == ("Ca", "2e-10")
+    assert pp["inits"][0][1:4] == ("sim.cyt.Ca", "Conc", "150e-6")
+    # data-driven model (the real case): named constants, tuple-unpack, evaluated
+    # arithmetic, a CONC dict, variable r[name], and an aliased (`c.`) init handle
+    dd = extract_params(
+        "KON_GRIP, KOFF_GRIP = 5.5e6, 0.3   # Gallimore 2016, Table 1\n"
+        "K_PP2A = 0.6 / 7.8e-6\n"
+        "CONC = {'GRIP': 1.1e-6, 'PICK1': 0.66e-6}   # basal (M)\n"
+        "FREE = ['GRIP', 'PICK1']\n"                  # non-numeric list: must be ignored
+        "def rev(name, l, rr, kf, kb):\n    l <r[name]> rr\n    r[name].K = kf, kb\n"
+        "c = sim.comp\nc.PKCa.Count = 0\n")
+    cd = {name: num for _, name, num, _ in dd["constants"]}
+    assert cd["KON_GRIP"] == 5.5e6 and cd["KOFF_GRIP"] == 0.3, dd["constants"]
+    assert abs(cd["K_PP2A"] - 0.6 / 7.8e-6) < 1, cd            # arithmetic evaluated
+    assert cd["CONC['GRIP']"] == 1.1e-6 and cd["CONC['PICK1']"] == 0.66e-6
+    assert "FREE" not in cd, "non-numeric list leaked into constants"
+    assert any(n == "Gallimore 2016, Table 1" for *_, n in dd["constants"]), "comment lost"
+    assert [s[1] for s in dd["schemes"]] == ["name"], dd["schemes"]   # variable index
+    assert dd["inits"][0][1:4] == ("c.PKCa", "Count", "0"), dd["inits"]  # aliased handle
     print("selftest OK")
 
 
 def main(paths):
     if paths == ["--selftest"]:
         return _selftest()
+    if paths and paths[0] == "--params":
+        if len(paths) < 2:
+            sys.exit("usage: python validate_steps_script.py --params model.py [...]")
+        for p in paths[1:]:
+            print_params(p)
+        return
     if not paths:
-        sys.exit("usage: python validate_steps_script.py model.py [...]   (or --selftest)")
+        sys.exit("usage: python validate_steps_script.py model.py [...]   "
+                 "(or --params model.py, or --selftest)")
     total_err = 0
     for p in paths:
         issues = validate(p)
