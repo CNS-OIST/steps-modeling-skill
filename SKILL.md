@@ -139,6 +139,37 @@ biological scale** (Conc is molar, Diffusion in m²/s, mesh `scale=`),
 newRun/toSave/run ordering, and reaction rates declared but never set. Exit code is
 non-zero on ERRORs (so it fits a pre-run / CI gate); `--selftest` checks the checker.
 
+## Semantic review (beyond static linting)
+
+The validator catches mechanical errors; some bugs need a **read of the model's
+meaning**. After the static pass, walk the model end to end against this checklist
+(it's what found a "records only 1 of 7 mitochondria" bug a syntax check can't see),
+and write up findings as **problem + fix + severity** — a short report, not just a
+pass/fail.
+
+- **Comprehension / loop-variable scoping** — a generator whose first iterable uses a
+  variable bound by a *later* `for` silently reads a stale value (`(t for t in m.tets
+  for m in mitos)` → only the last `m`). The validator now flags the clear case; still
+  eyeball aggregations built over lists of compartments/patches.
+- **Rate-constant magnitude vs intent** — does each `r[..].K` match its inline comment /
+  cited source? A `v*factor` landing ~1000× off a commented "default" is a red flag.
+  Sanity the order: 1/s (first-order), 1/(M·s) (second-order).
+- **Units inside custom rate functions** — `VDepRate`/lambda rates receive V in *volts*;
+  a formula written in mV must scale (`V*1e3`), and a 1/ms result needs `*1e3` → 1/s.
+  Static checks can't see inside the lambda.
+- **Clamped species with dynamics** — a `Clamped = True` species is pinned, so its
+  channels/buffers/reactions can't move it. Intended (a clamp experiment) or a leftover
+  that defeats the model?
+- **Stoichiometry & cooperative factors** — multi-site binding needs statistical factors
+  (2·kon / 2·koff for two equivalent sites); reversible `<r[..]>` takes `(kf, kb)`.
+- **Initialised vs declared** — every Species/Complex meant to start non-zero needs a
+  `Count`/`Conc`; species that are only ever products are fine at 0.
+- **Mesh side** — did every input body become a compartment? Tiny bodies below the
+  element size (or collapsed by a resolver wall-shift) can silently drop.
+
+When the semantic read turns up a *new* class of bug that's statically detectable, add
+a check for it (next section) so the next script is caught automatically.
+
 ## Maintaining this skill
 
 When you hit a STEPS scripting error this skill didn't prevent, **extend it in the

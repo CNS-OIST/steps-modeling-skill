@@ -190,3 +190,4 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | `Outer compartment not defined for this patch` | `.o` species on a `outer=None` patch | only `.i`/`.s` on a boundary patch, or give it an outer comp |
 | counts stay 0 | rate too low / wrong units (`Conc` is molar) / no reactant at surface | raise `K`/`Count`; check SI + molar |
 | mixing APIs errors | API_1 and API_2 in one script | pick one; API_2 needs `import steps.interface` first |
+| aggregation reads only the last element (silent) | comprehension's first iterable uses a name bound by a later `for` (`(t for t in m.tets for m in mitos)`) | reorder: `for m in mitos for t in m.tets` |

@@ -198,6 +198,30 @@ def _scale_checks(tree):
     return out
 
 
+def _comprehension_checks(tree):
+    """Catch the loop-variable-ordering trap: a comprehension whose FIRST iterable
+    uses a name bound by a LATER `for`. Python evaluates the first iterable eagerly in
+    the enclosing scope, so that name is a stale value — e.g.
+    `TetList(t for t in mito.tets for mito in mitos)` reads only the last `mito`.
+    A real, silent bug found in a STEPS model (mitochondrial-Ca recording)."""
+    out = []
+    comps = (ast.GeneratorExp, ast.ListComp, ast.SetComp, ast.DictComp)
+    for node in ast.walk(tree):
+        if isinstance(node, comps) and len(node.generators) >= 2:
+            later = {n.id for g in node.generators[1:]
+                     for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+            first_iter = {n.id for n in ast.walk(node.generators[0].iter)
+                          if isinstance(n, ast.Name)}
+            clash = sorted(first_iter & later)
+            if clash:
+                out.append(("WARNING", node.lineno,
+                            f"comprehension's first iterable uses {clash}, which a later "
+                            "`for` binds — it reads a stale value, not each element",
+                            "reorder the clauses so the variable is bound before use: "
+                            "`[... for outer in seq for inner in outer...]`"))
+    return out
+
+
 def validate_source(src):
     try:
         tree = ast.parse(src)
@@ -205,7 +229,7 @@ def validate_source(src):
         return [("ERROR", e.lineno or 0, f"syntax error: {e.msg}", "fix the syntax error")]
     lines = src.splitlines()
     issues = (_import_checks(lines) + _ast_checks(tree) + _flow_checks(lines)
-              + _reaction_checks(src) + _scale_checks(tree))
+              + _reaction_checks(src) + _scale_checks(tree) + _comprehension_checks(tree))
     return sorted(issues, key=lambda x: (x[1], x[0]))
 
 
@@ -233,6 +257,9 @@ def _selftest():
           "rate = VDepRate.Create(\n    lambda V: V)\n"   # args wrap to next line
           "sim.cyto.Fluo.Conc = 0.0\n")                   # zeroing a species is fine
     assert validate_source(ok) == [], f"false positive(s): {validate_source(ok)}"
+    # comprehension loop-variable-ordering trap (the mito_tet_lst bug)
+    comp = validate_source("ts = TetList(t for t in m.tets for m in mitos)\n")
+    assert any("stale value" in p for _, _, p, _ in comp), "comprehension-order check"
     print("selftest OK")
 
 
