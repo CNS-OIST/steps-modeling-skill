@@ -237,9 +237,19 @@ pip install fpdf2                                    # once
 python report_to_pdf.py report.md report.pdf
 ```
 
-It supports the usual subset (`#`/`##`/`###` headings, paragraphs, `-` bullets, pipe
-tables, `**bold**`) and Unicode (µ, M⁻¹s⁻¹, Ca²⁺, →, ✓). Structure the report so the
-verdict is readable at a glance:
+The helper picks the best renderer available: a **browser** (Chrome/Chromium/Edge) +
+the `markdown` module → styled HTML → PDF; else **fpdf2** → pure-Python PDF; else it
+leaves the `.md` as the report. You write Markdown once; the environment decides the
+output. It supports the usual subset (`#`/`##`/`###` headings, paragraphs, `-` bullets,
+pipe tables, `**bold**`) and Unicode (µ, M⁻¹s⁻¹, Ca²⁺, →, ✓).
+
+**Skip report generation under CI / non-interactive automation.** A report is for a
+human; in CI there's no one to read it, hand fixes to, or grant permission. There, run
+**only the static lint** as the exit-code gate (`validate_steps_script.py model.py`) and
+skip the report, the literature web-search, and the permission prompts — they're all
+interactive steps. (Detect automation the usual way, e.g. a `CI` env var or no TTY.)
+
+Structure the report so the verdict is readable at a glance:
 
 1. **Verdict** — one short paragraph + a tier-count table (HARD / ADVISORY / CONFIRMED).
 2. **Comparison tables** — model value | published value(s) + conditions | source | match.

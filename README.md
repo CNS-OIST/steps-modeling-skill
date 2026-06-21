@@ -33,10 +33,10 @@ context.
 **Scripts (run by the agent or in CI):**
 - **[validate_steps_script.py](validate_steps_script.py)** — lint + `--params`, see below.
 - **[report_to_pdf.py](report_to_pdf.py)** — turn a validation report (Markdown) into a
-  PDF in **pure Python via fpdf2** — no browser or system binaries; Unicode via DejaVu
-  Sans. `pip install fpdf2` once, then `python report_to_pdf.py report.md report.pdf`
-  (or `--selftest`). The agent writes the report; this only converts. If fpdf2 can't be
-  installed, the Markdown report stands on its own.
+  PDF, picking the best renderer available: a **browser** (Chrome/Chromium/Edge) +
+  `markdown` → styled HTML → PDF; else **fpdf2** → pure-Python PDF (no binaries; Unicode
+  via DejaVu Sans); else the `.md` stands on its own. `python report_to_pdf.py report.md
+  report.pdf` (or `--selftest`). The agent writes the report; this only converts.
 
 ## Validation hierarchy
 
@@ -80,8 +80,8 @@ model's meaning and, finally, the outside world.
 │      SOFT  values that legitimately differ (species/temp/prep/lab)   │
 │            → advisory suggestion + citation, not a failure           │
 └─────────────────────────────────────────────────────────────────────┘
-      │
-      ▼  report_to_pdf.py report.md report.pdf   (pure-Python fpdf2)
+      │   (interactive only — skip tiers 2–3 under CI; static lint is the CI gate)
+      ▼  report_to_pdf.py report.md report.pdf   (browser→HTML, else fpdf2, else .md)
    PDF report  (verdict · comparison tables · HARD/ADVISORY findings · sources)
       │
       ▼  ask the modeler before editing the script — decline ⇒ stop at the report
