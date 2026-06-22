@@ -118,9 +118,10 @@ def _ast_checks(tree):
                             f"assign it: `obj = {cls}.Create(...)`"))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr in LOADERS:
-            if not any(k.arg == "scale" for k in node.keywords):
-                out.append(("WARNING", node.lineno, f"{node.func.attr}() has no scale=",
-                            "pass scale= so coords become metres (1e-9 for nm, 1e-6 for µm)"))
+            # scale is the 2nd positional arg (LoadGmsh(path, scale, ...)) or scale=kw
+            if not any(k.arg == "scale" for k in node.keywords) and len(node.args) < 2:
+                out.append(("WARNING", node.lineno, f"{node.func.attr}() has no scale",
+                            "pass scale (2nd arg or scale=) so coords become metres (1e-9 nm, 1e-6 µm)"))
     return out
 
 
@@ -443,6 +444,7 @@ def _selftest():
     # regression: wrapped Create() args and Conc = 0 are valid, not warnings
     ok = ("import steps.interface\nfrom steps.model import *\n"
           "rate = VDepRate.Create(\n    lambda V: V)\n"   # args wrap to next line
+          "mesh = TetMesh.LoadGmsh('m.msh', 1e-6)\n"      # scale given positionally, not scale=
           "sim.cyto.Fluo.Conc = 0.0\n")                   # zeroing a species is fine
     assert validate_source(ok) == [], f"false positive(s): {validate_source(ok)}"
     # comprehension loop-variable-ordering trap (the mito_tet_lst bug)
