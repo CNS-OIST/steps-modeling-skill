@@ -10,19 +10,21 @@ duplicate-interface-triangle solver crashes, units).
 
 It's **markdown guidance + runnable Python**: cardinal rules and a cheatsheet the
 agent reads, working templates it adapts, and a validator script it runs to lint a
-model and to extract its kinetics for checking against the literature. Works with
-**Claude Code** as a first-class skill and with **any other AI agent** as reference
-context.
+model and to extract its kinetics for checking against the literature. It also
+**converts legacy API_1 scripts to API_2** (asking first, multi-file projects
+included). Works with **Claude Code** as a first-class skill and with **any other AI
+agent** as reference context.
 
 ## Contents
 
 **Docs (read by the agent):**
 - **[SKILL.md](SKILL.md)** — the skill: cardinal rules, the canonical script
-  skeleton, a semantic-review checklist, the *Validate against the literature*
-  procedure, and a debugging checklist. (Has the YAML frontmatter Claude Code needs.)
+  skeleton, the *API_1 → API_2 conversion* gate (ask first; multi-file projects),
+  a semantic-review checklist, the *Validate against the literature* procedure, and a
+  debugging checklist. (Has the YAML frontmatter Claude Code needs.)
 - **[reference.md](reference.md)** — full cheatsheet: solver table, model/geometry/
-  simulation/recording recipes, EField/complexes/MPI pointers, units, a literature
-  units → STEPS conversion crib, and a common-errors table.
+  simulation/recording recipes, EField/complexes/MPI pointers, units, an API_1 → API_2
+  conversion crib, a literature units → STEPS conversion crib, and a common-errors table.
 
 **Templates (adapted into new models), verified against STEPS 5.1.0:**
 - **[templates/well_mixed.py](templates/well_mixed.py)** — well-mixed model
@@ -94,12 +96,24 @@ Pure-Python, no execution of the model and **STEPS not required** (AST + regex o
 so it's safe to run in CI or a pre-run gate. Two modes:
 
 ```bash
-python validate_steps_script.py model.py        # lint: cardinal-rule + unit/scale checks
-python validate_steps_script.py --params model.py   # extract kinetics as a table
-python validate_steps_script.py --selftest       # check the checker
+python validate_steps_script.py model.py            # lint: cardinal-rule + unit/scale checks
+python validate_steps_script.py model.py driver.py  # multi-file model: lint the whole set
+python validate_steps_script.py model_dir/          # or just pass the folder (every .py inside)
+python validate_steps_script.py --params model.py [driver.py ... | folder/]   # extract kinetics
+python validate_steps_script.py --selftest          # check the checker
 ```
 
-- **Lint** flags import order / API_1↔API_2 mixing, `.Create()` source-line misuse
+**Multi-file models** (a module defining the model/geometry that a driver imports, etc.)
+are validated as one unit at every tier — pass all the files; the linter checks each and
+the agent reads results cross-file (a symbol defined in a sibling module isn't
+"undefined"; `--params` dumps are merged before the literature comparison). See
+SKILL.md → *Multi-file models*.
+
+- **Lint** detects the API flavor first: a **pure API_1 script is valid, not flagged as
+  errors** — it gets one advisory note + the API-agnostic checks; **API_1↔API_2 mixing**
+  (API_1 syntax alongside `import steps.interface`) gets a **warning** for unsafe practice
+  recommending a full update to API_2. For API_2 it flags import order, `.Create()`
+  source-line misuse
   (loops, comprehensions, no assignment), reserved Species names, unit & biological
   scale (Conc is molar, Diffusion in m²/s, mesh `scale=`), newRun/toSave/run ordering,
   unset reaction rates, plus semantic traps (stale comprehension loop-variable,
@@ -123,9 +137,14 @@ git clone https://github.com/CNS-OIST/steps-modeling-skill.git \
 `.claude/skills/steps-modeling/` inside your project. Claude Code discovers it by the
 `name`/`description` in `SKILL.md` and loads it when you ask anything about STEPS
 modelling — e.g. *“write a STEPS model of calcium buffering in this mesh”*,
+*“convert this old API_1 STEPS script to API_2”*,
 *“check my model's rate constants against the Bhalla & Iyengar paper”*, or
 *“why does my Tetexact simulation crash with `i < 4`?”* The agent runs
 `validate_steps_script.py` itself; you can also run it by hand.
+
+The skill is versioned in [VERSION](VERSION); on first use it checks for a newer
+release upstream and tells you how to update (it can't update itself — `git pull` the
+clone, or automate it with a `SessionStart` hook that pulls the skill directory).
 
 ## Use with any other AI agent
 

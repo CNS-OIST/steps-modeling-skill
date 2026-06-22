@@ -189,10 +189,40 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | `Assertion Fail: i < 4` (Tetexact setup) | duplicate triangle elements per facet | dedup interface tris (above) |
 | `Outer compartment not defined for this patch` | `.o` species on a `outer=None` patch | only `.i`/`.s` on a boundary patch, or give it an outer comp |
 | counts stay 0 | rate too low / wrong units (`Conc` is molar) / no reactant at surface | raise `K`/`Count`; check SI + molar |
-| mixing APIs errors | API_1 and API_2 in one script | pick one; API_2 needs `import steps.interface` first |
+| mixing APIs (validator warns — unsafe) | API_1 and API_2 in one script; `steps.interface` switches `steps.*` to API_2, so API_1 solver/methods then fail | update fully to API_2; a pure API_1 script is fine, just legacy |
 | aggregation reads only the last element (silent) | comprehension's first iterable uses a name bound by a later `for` (`(t for t in m.tets for m in mitos)`) | reorder: `for m in mitos for t in m.tets` |
 | boundary tris/tets selection comes out empty/wrong | exact float `==`/`in` on geometry (`tri.center.y in [bbox.max.y]`) never matches | tolerance `abs(a-b) < eps` or half-space `tri.center.y >= z0` |
 | geometry setup is O(n²) / a list is recomputed | a `for x in seq:` whose body ignores `x` and rebuilds a comprehension over `seq` | drop the stray loop; compute the comprehension once |
+
+## API_1 → API_2 conversion
+
+When the modeler asks to convert a legacy API_1 script (see SKILL.md → "API_1 input"),
+rewrite into a new `*_api2.py` file with a `# Converted to STEPS API_2 from: <orig>`
+header. The structural map:
+
+| API_1 | API_2 |
+|---|---|
+| `import steps.model as smodel` etc. (aliased) | `import steps.interface` then `from steps.<mod> import *` (interface first) |
+| `mdl = smodel.Model()` | `mdl = Model()` + `with mdl:` for everything inside |
+| `S = smodel.Spec('Ca', mdl)` | `Ca = Species.Create()` (var name *is* the name) |
+| `vsys = smodel.Volsys('v', mdl)` | `vsys = VolumeSystem.Create()` |
+| `smodel.Reac('r', vsys, lhs=[A], rhs=[B], kcst=k)` | inside `with vsys:` → `A >r['r']> B` then `r['r'].K = k` |
+| `smodel.SReac(...)` (ilhs/olhs/slhs) | surface reaction with `.i`/`.o`/`.s` tags inside `with ssys:` |
+| `smodel.Diff('d', vsys, S, dcst=D)` | inside `with vsys:` → `Diffusion(S, D)` |
+| `sgeom.Comp('cyt', geom, vol=V)` / mesh `TmComp` | `Compartment.Create(tets, vsys)` inside `with mesh/geom:` |
+| `sgeom.TmPatch('m', mesh, tris, icomp, ocomp)` | `Patch.Create(tris, inner, outer, ssys)` (inner first) |
+| `steps.geom.Tetmesh` / `meshio` load | `TetMesh.LoadGmsh(path, scale=...)` |
+| `solv = ssolver.Tetexact(mdl, mesh, rng)` | `sim = Simulation('Tetexact', mdl, mesh, rng)` |
+| `solv.reset()` | `sim.newRun()` |
+| `solv.setCompConc('cyt', 'Ca', c)` | `sim.cyt.Ca.Conc = c` |
+| `solv.setPatchCount('m', 'P', n)` | `sim.m.P.Count = n` |
+| `solv.getCompConc('cyt', 'Ca')` | `sim.cyt.Ca.Conc` |
+| `solv.run(t)` | `sim.run(t)` |
+| manual `numpy` result arrays + `getCompConc` in a loop | `rs = ResultSelector(sim)`; `sim.toSave(rs.cyt.Ca.Conc, dt=...)` before running |
+
+Names in API_2 come from the **left-hand variable** (rule 2), so the API_1 string name
+and the variable should match (`Ca = Species.Create()` → addressed as `sim.cyt.Ca`).
+After converting, run the validator on the new file.
 
 ## Literature units → STEPS (SI + molar)
 

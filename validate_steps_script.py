@@ -13,7 +13,7 @@ prints a concrete **fix** suggestion:
   - newRun / toSave / run ordering
   - reaction rate constants (`r['k'].K`) declared but never set
 
-    python validate_steps_script.py model.py [more.py ...]   # or --selftest
+    python validate_steps_script.py model.py [more.py ... | folder/]   # or --selftest
 
 Each issue is (severity, line, problem, fix). Exit 0 if no ERRORs, 1 otherwise;
 WARNINGs never fail the run.
@@ -29,21 +29,26 @@ LOADERS = ("LoadGmsh", "LoadAbaqus", "LoadTetGen", "LoadVTK")
 
 
 def _import_checks(lines):
-    out, steps_imports, iface = [], [], None
+    # Only reached for non-pure-API_1 scripts (pure API_1 is branched off earlier). So an
+    # API_1 marker here means it sits alongside `import steps.interface` = unsafe mixing.
+    out, steps_imports, iface, markers = [], [], None, []
     for i, ln in enumerate(lines, 1):
         if re.match(r"\s*import\s+steps\.interface\b", ln):
             iface = i
         elif re.match(rf"\s*(from|import)\s+steps\.({STEPS_SUBMODS})\b", ln):
             steps_imports.append(i)
-        if re.match(rf"\s*import\s+steps\.({STEPS_SUBMODS})\s+as\b", ln):
-            out.append(("ERROR", i, "API_1-style aliased steps import",
-                        "use `import steps.interface` then `from steps.<mod> import *`"))
-        if re.search(r"steps\.(mpi\.)?solver\b", ln):
-            out.append(("ERROR", i, "`steps.solver` is the API_1 solver",
-                        "create the solver as `Simulation('Tetexact', mdl, geom, rng)`"))
-        if re.search(r"\.(set|get)(Comp|Patch|Tet|Tri|Vert)\w*\s*\(", ln):
-            out.append(("ERROR", i, "API_1 solver method (setComp.../getPatch...)",
-                        "use sim-path access, e.g. `sim.<comp>.<Spec>.Count` / `.Conc`"))
+        if (re.match(rf"\s*import\s+steps\.({STEPS_SUBMODS})\s+as\b", ln)
+                or re.search(r"steps\.(mpi\.)?solver\b", ln)
+                or re.search(r"\.(set|get)(Comp|Patch|Tet|Tri|Vert)\w*\s*\(", ln)):
+            markers.append(i)
+    if markers and iface is not None:
+        out.append(("WARNING", markers[0],
+                    "API_1 syntax mixed with API_2 (`import steps.interface`) — unsafe practice; "
+                    "`steps.interface` switches steps.* to the API_2 modules, so API_1 solver "
+                    "imports and API_1 solver methods then fail outright (a stray aliased import may "
+                    "still run, but it's confusing and fragile)",
+                    "update the script fully to API_2: aliased imports → `from steps.<mod> import *`, "
+                    "`steps.solver`/`setComp...`/`getPatch...` → `Simulation(...)` + sim-path access"))
     if steps_imports and iface is None:
         out.append(("ERROR", steps_imports[0], "missing `import steps.interface`",
                     "add `import steps.interface` as the FIRST steps import"))
@@ -118,9 +123,10 @@ def _ast_checks(tree):
                             f"assign it: `obj = {cls}.Create(...)`"))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr in LOADERS:
-            if not any(k.arg == "scale" for k in node.keywords):
-                out.append(("WARNING", node.lineno, f"{node.func.attr}() has no scale=",
-                            "pass scale= so coords become metres (1e-9 for nm, 1e-6 for µm)"))
+            # scale is the 2nd positional arg (LoadGmsh(path, scale, ...)) or scale=kw
+            if not any(k.arg == "scale" for k in node.keywords) and len(node.args) < 2:
+                out.append(("WARNING", node.lineno, f"{node.func.attr}() has no scale",
+                            "pass scale (2nd arg or scale=) so coords become metres (1e-9 nm, 1e-6 µm)"))
     return out
 
 
@@ -409,15 +415,43 @@ def print_params(path):
         print("  (no reactions, rates, diffusions, constants, or initial conditions found)")
 
 
+def _is_api1(lines):
+    """A pure API_1 script: has legacy markers and NO `import steps.interface`.
+    (API_1 markers WITH an interface import = genuine API_1↔2 mixing, kept as errors.)"""
+    if any(re.match(r"\s*import\s+steps\.interface\b", ln) for ln in lines):
+        return False
+    return any(re.match(rf"\s*import\s+steps\.({STEPS_SUBMODS})\s+as\b", ln)
+               or re.search(r"steps\.(mpi\.)?solver\b", ln)
+               or re.search(r"\.(set|get)(Comp|Patch|Tet|Tri|Vert)\w*\s*\(", ln)
+               for ln in lines)
+
+
+def _api1_notice(lines):
+    """API_1 is valid, not an error — emit ONE advisory note, not one error per marker."""
+    line = next((i for i, ln in enumerate(lines, 1) if re.search(r"\bsteps\.", ln)), 1)
+    return [("WARNING", line,
+             "API_1 (legacy steps.* interface) script — valid; the API_2-specific checks are "
+             "skipped here (only API-agnostic geometry/loop checks run)",
+             "API_1 syntax is not an error; to get full structural + unit validation, convert "
+             "to API_2 (the skill does this)")]
+
+
 def validate_source(src):
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
         return [("ERROR", e.lineno or 0, f"syntax error: {e.msg}", "fix the syntax error")]
     lines = src.splitlines()
-    issues = (_import_checks(lines) + _ast_checks(tree) + _flow_checks(lines)
-              + _reaction_checks(src) + _scale_checks(tree) + _comprehension_checks(tree)
-              + _loop_checks(tree) + _geometry_checks(tree))
+    # API-agnostic structural checks run for both APIs.
+    agnostic = _comprehension_checks(tree) + _loop_checks(tree) + _geometry_checks(tree)
+    if _is_api1(lines):
+        # Pure API_1: its syntax is valid, so don't report it as errors — note it, then run
+        # only the checks that apply regardless of API. (newRun/run, r[].K, .Create, scale=
+        # are all API_2-shaped and would misfire on API_1.)
+        issues = _api1_notice(lines) + agnostic
+    else:
+        issues = (_import_checks(lines) + _ast_checks(tree) + _flow_checks(lines)
+                  + _reaction_checks(src) + _scale_checks(tree) + agnostic)
     return sorted(issues, key=lambda x: (x[1], x[0]))
 
 
@@ -443,6 +477,7 @@ def _selftest():
     # regression: wrapped Create() args and Conc = 0 are valid, not warnings
     ok = ("import steps.interface\nfrom steps.model import *\n"
           "rate = VDepRate.Create(\n    lambda V: V)\n"   # args wrap to next line
+          "mesh = TetMesh.LoadGmsh('m.msh', 1e-6)\n"      # scale given positionally, not scale=
           "sim.cyto.Fluo.Conc = 0.0\n")                   # zeroing a species is fine
     assert validate_source(ok) == [], f"false positive(s): {validate_source(ok)}"
     # comprehension loop-variable-ordering trap (the mito_tet_lst bug)
@@ -481,7 +516,50 @@ def _selftest():
     assert any(n == "Gallimore 2016, Table 1" for *_, n in dd["constants"]), "comment lost"
     assert [s[1] for s in dd["schemes"]] == ["name"], dd["schemes"]   # variable index
     assert dd["inits"][0][1:4] == ("c.PKCa", "Count", "0"), dd["inits"]  # aliased handle
+    # a pure API_1 script is VALID, not a pile of errors: one advisory note, zero errors,
+    # and the API-agnostic checks still run (here: float-equality geometry trap)
+    api1 = ("import steps.model as smod\n"
+            "import steps.solver as ssolver\n"
+            "mdl = smod.Model()\n"
+            "sim = ssolver.Tetexact(mdl, g, r)\n"
+            "sim.setCompConc('cyt', 'ca', 1e-6)\n"
+            "sim.run(1.0)\n"
+            "xs = [t for t in surf if t.center.y in ends]\n")   # geometry trap, API-agnostic
+    a1 = validate_source(api1)
+    assert not any(s == "ERROR" for s, *_ in a1), f"API_1 must not be errors: {a1}"
+    assert any("API_1" in p for _, _, p, _ in a1), "API_1 should be noted"
+    assert any("rarely matches" in p for _, _, p, _ in a1), "agnostic checks must still run on API_1"
+    # API_1 markers WITH an interface import = unsafe mixing → a WARNING recommending API_2,
+    # NOT an error (and not the pure-API_1 advisory either)
+    mix = validate_source("import steps.interface\nimport steps.model as smod\n")
+    assert not any(s == "ERROR" for s, *_ in mix), f"mixing should warn, not error: {mix}"
+    assert any("mixed" in p for _, _, p, _ in mix), f"mixing should be flagged: {mix}"
+    # directory argument expands to the .py files inside, skipping __pycache__
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, "model.py"), "w").close()
+        os.makedirs(os.path.join(d, "__pycache__"))
+        open(os.path.join(d, "__pycache__", "cached.py"), "w").close()
+        ex = _expand([d, "literal.py"])
+        assert ex == [os.path.join(d, "model.py"), "literal.py"], ex
     print("selftest OK")
+
+
+def _expand(paths):
+    """Expand any directory argument to the .py files inside it (recursive, skipping
+    __pycache__), so the user can pass a model folder instead of every filename."""
+    out = []
+    for p in paths:
+        pp = pathlib.Path(p)
+        if pp.is_dir():
+            files = sorted(str(f) for f in pp.rglob("*.py")
+                           if "__pycache__" not in f.parts)
+            if not files:
+                sys.exit(f"no .py files found in directory: {p}")
+            out.extend(files)
+        else:
+            out.append(p)
+    return out
 
 
 def main(paths):
@@ -490,14 +568,14 @@ def main(paths):
     if paths and paths[0] == "--params":
         if len(paths) < 2:
             sys.exit("usage: python validate_steps_script.py --params model.py [...]")
-        for p in paths[1:]:
+        for p in _expand(paths[1:]):
             print_params(p)
         return
     if not paths:
         sys.exit("usage: python validate_steps_script.py model.py [...]   "
-                 "(or --params model.py, or --selftest)")
+                 "(or a folder, --params model.py, or --selftest)")
     total_err = 0
-    for p in paths:
+    for p in _expand(paths):
         issues = validate(p)
         errs = sum(1 for s, *_ in issues if s == "ERROR")
         total_err += errs

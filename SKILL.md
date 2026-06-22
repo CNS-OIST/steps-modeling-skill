@@ -15,6 +15,23 @@ EField/complexes/parallel, ResultSelector recipes, mesh-from-pipeline notes). St
 from a [template](templates/) and adapt. The rules below are the ones you must not
 get wrong.
 
+## Staying current (version check)
+
+This skill is versioned in [VERSION](VERSION). **On first use in a session**, check
+whether a newer version is published and, if so, tell the user how to update — then
+continue either way. This is advisory: never block on it, and skip it under CI / when
+there's no network.
+
+1. Read the local `VERSION` (in this skill's directory).
+2. Fetch the latest (one line; WebFetch the same URL if `curl` is unavailable):
+   `curl -fsS https://raw.githubusercontent.com/CNS-OIST/steps-modeling-skill/main/VERSION`
+3. If the upstream version is higher (semver compare), tell the user a newer
+   `steps-modeling` skill is out (show both
+   versions) and how to update: `git -C <skill dir> pull` for a git checkout, or
+   re-install / update the plugin otherwise. **The skill cannot update itself** — the
+   files are read from disk at session start, so the user updates, then the next session
+   picks it up. (The maintainer can automate the pull with a `SessionStart` hook.)
+
 ## Cardinal rules
 
 1. **Imports, in order.** `import steps.interface` FIRST, then star-import the
@@ -124,13 +141,83 @@ sim.run(1.0)
 print(caConc.data[0, -1], 'at t =', caConc.time[0, -1])
 ```
 
+## API_1 input → ask before converting
+
+STEPS scripts come in two flavours. **API_1** (the legacy procedural interface) shows
+markers the validator already flags: `import steps.model as smodel` (aliased imports),
+`steps.solver` / `steps.mpi.solver`, and `sim.setCompConc(...)` / `getPatchCount(...)`
+solver methods. If the input is API_1:
+
+1. **Ask the modeler** whether to convert it to API_2 (`steps.interface`). Do not
+   convert silently — it's a rewrite, and they may want the original validated as-is.
+2. **If yes** — rewrite into a **new file** (`<name>_api2.py`, never overwrite the
+   original). Put a source reference as the first comment so the provenance is recorded:
+   ```python
+   # Converted to STEPS API_2 from: <original filename>
+   ```
+   Use the conversion crib in [reference.md](reference.md) → "API_1 → API_2 conversion".
+   Then validate the new file.
+3. **If no** — validate the original as it is. The lint **does not flag API_1 syntax as
+   errors** (API_1 is valid, just legacy): it detects the script is API_1, emits one
+   advisory note, and runs the API-agnostic checks (geometry/loop/comprehension traps).
+   The API_2-specific checks (rate-set, `newRun`/`run` ordering, units/scale, `.Create()`)
+   are skipped because they're API_2-shaped — so **converting still buys fuller
+   validation**, but a clean API_1 script reports clean.
+
+   (API_1 markers in a file that *also* `import steps.interface` are **API_1↔2 mixing** —
+   not a pure API_1 script. That gets a **warning** for unsafe practice recommending a full
+   update to API_2. `import steps.interface` switches `steps.*` to the API_2 modules, so
+   hard API_1 usage — `steps.solver` imports, API_1 solver methods, API_1 constructors —
+   fails outright; a stray aliased import may still run but is confusing and fragile.)
+
+**Multi-file models** convert as a set — see *Multi-file models* below for finding the
+set. Conversion-specific points: produce one `*_api2.py` per source file and fix the
+inter-file imports (`import camodel` → `import camodel_api2`); API_2 objects name
+themselves from their assignment, so a model built in one file is reached in another by
+passing the **model object** (`gen_geom(mdl, ...)`; fetch systems via `mdl.vsys`) and by
+sim-path/`MATCH` names, not by re-importing the Python objects; and **reorder** anything
+that adds to the mesh (e.g. `ROI`s built in the driver) to run *before* `Simulation(...)`
+— the API_1 habit of creating ROIs and setting counts after the solver must move ahead.
+
+## Multi-file models (applies to every tier below)
+
+A STEPS model is often split across files — a module defining the model/geometry, a
+driver that `import`s it and runs, maybe shared constants. Validation is about the
+*model*, not a file, so treat the whole file set as the unit in **every** tier (static
+lint, semantic review, literature):
+
+- **Find the set first.** Start from the file the modeler named and follow local
+  `import`s to the other project files (the driver imports the model module, etc.).
+  Validate them all, not just the one named.
+- **Static lint runs on every file at once** — `validate_steps_script.py model.py
+  driver.py constants.py`, or just pass the **folder** (`validate_steps_script.py
+  model_dir/`) to lint every `.py` inside (recursive, skipping `__pycache__`). It lints
+  each and sums errors. Read the results **cross-file**:
+  a name defined or imported from a sibling module is not "undefined" (the linter is
+  per-file AST and can't see across — don't treat its silence or a missing symbol as
+  proof), and a flow that legitimately spans files (reactions in the model module,
+  `newRun()`/`run()` in the driver) is fine — judge run-ordering in the file that actually
+  drives the simulation.
+- **`--params` over the whole set, then combine.** `validate_steps_script.py --params
+  model.py driver.py` dumps each file; **merge the dumps** — reactions/diffusion usually
+  live in the model file, initial `Conc`/`Count` in the driver — into one picture before
+  the literature comparison. A reaction, rate, or species is only "missing" if it's absent
+  from *all* files.
+- **Semantic review over the union.** Walk the checklist across files together: a species
+  declared in the model file but initialised in the driver *is* initialised; a `Clamped`
+  set in the driver pins a model-file species; loop/comprehension and geometry-selection
+  traps live wherever the code is. Don't flag a file in isolation for something another
+  file supplies.
+
 ## Validate a script
 
 Before running a STEPS script, lint it for the pitfalls above — no execution, STEPS
 not required:
 
 ```bash
-python validate_steps_script.py model.py
+python validate_steps_script.py model.py            # one file
+python validate_steps_script.py model.py driver.py   # whole multi-file model at once
+python validate_steps_script.py model_dir/           # a folder: lints every .py inside
 ```
 
 It reports each issue with a concrete **fix**: import order / API_1↔API_2 mixing,
@@ -227,10 +314,12 @@ modeler declines both, note that the kinetics are unvalidated and stop.
 ### Generate a report
 
 For a substantial validation (a literature comparison, or a semantic review with
-several findings) — or whenever the modeler asks for a report — write it up as a file
-and offer a PDF. Write the report as **Markdown** (it doubles as a readable `.md`) and
-convert with the bundled helper, which renders to PDF in **pure Python via fpdf2** — no
-browser or system binaries:
+several findings) — or whenever the modeler asks for a report — write it up as a file.
+Write the report as **Markdown** (it doubles as a readable `.md`), then **render the PDF
+right away if a renderer is available** (a browser, or `fpdf2`) — don't stop at the `.md`
+and merely offer the PDF when you could just produce it. Only fall back to "here's the
+`.md`, render later" when **no** renderer is present (see the degrade note below). Convert
+with the bundled helper:
 
 ```bash
 pip install fpdf2                                    # once
@@ -284,7 +373,14 @@ When you hit a STEPS scripting error this skill didn't prevent, **extend it in t
 same change**: add a check (with a self-test case) to `validate_steps_script.py`, and
 record the trap in the cardinal rules above, the `reference.md` common-errors table,
 and the debugging checklist below. Keep the validator and the docs in sync — the
-validator should catch every documented gotcha.
+validator should catch every documented gotcha. **Bump [VERSION](VERSION)** in the same
+change (semver `MAJOR.MINOR.PATCH` — patch for fixes, minor for new checks/features, major
+for a breaking change) so other users' version check flags the update. A local pre-push
+hook enforces this: activate it once per clone with `git config core.hooksPath hooks` — it
+blocks a push that changes `SKILL.md`/`reference.md`/`validate_steps_script.py` without a
+`VERSION` bump (override a single push with `git push --no-verify`). **This hook is for
+maintainers/contributors of the skill only — skill *users* never need it** (they just
+install the skill and, optionally, run the version check above).
 
 ## Debugging checklist
 
