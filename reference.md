@@ -189,7 +189,7 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | `Assertion Fail: i < 4` (Tetexact setup) | duplicate triangle elements per facet | dedup interface tris (above) |
 | `Outer compartment not defined for this patch` | `.o` species on a `outer=None` patch | only `.i`/`.s` on a boundary patch, or give it an outer comp |
 | counts stay 0 | rate too low / wrong units (`Conc` is molar) / no reactant at surface | raise `K`/`Count`; check SI + molar |
-| mixing APIs errors | API_1 and API_2 in one script | pick one; API_2 needs `import steps.interface` first |
+| mixing APIs (validator warns — unsafe) | API_1 and API_2 in one script; `steps.interface` switches `steps.*` to API_2, so API_1 solver/methods then fail | update fully to API_2; a pure API_1 script is fine, just legacy |
 | aggregation reads only the last element (silent) | comprehension's first iterable uses a name bound by a later `for` (`(t for t in m.tets for m in mitos)`) | reorder: `for m in mitos for t in m.tets` |
 | boundary tris/tets selection comes out empty/wrong | exact float `==`/`in` on geometry (`tri.center.y in [bbox.max.y]`) never matches | tolerance `abs(a-b) < eps` or half-space `tri.center.y >= z0` |
 | geometry setup is O(n²) / a list is recomputed | a `for x in seq:` whose body ignores `x` and rebuilds a comprehension over `seq` | drop the stray loop; compute the comprehension once |

@@ -109,7 +109,11 @@ the agent reads results cross-file (a symbol defined in a sibling module isn't
 "undefined"; `--params` dumps are merged before the literature comparison). See
 SKILL.md → *Multi-file models*.
 
-- **Lint** flags import order / API_1↔API_2 mixing, `.Create()` source-line misuse
+- **Lint** detects the API flavor first: a **pure API_1 script is valid, not flagged as
+  errors** — it gets one advisory note + the API-agnostic checks; **API_1↔API_2 mixing**
+  (API_1 syntax alongside `import steps.interface`) gets a **warning** for unsafe practice
+  recommending a full update to API_2. For API_2 it flags import order, `.Create()`
+  source-line misuse
   (loops, comprehensions, no assignment), reserved Species names, unit & biological
   scale (Conc is molar, Diffusion in m²/s, mesh `scale=`), newRun/toSave/run ordering,
   unset reaction rates, plus semantic traps (stale comprehension loop-variable,

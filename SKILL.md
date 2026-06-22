@@ -156,8 +156,18 @@ solver methods. If the input is API_1:
    ```
    Use the conversion crib in [reference.md](reference.md) → "API_1 → API_2 conversion".
    Then validate the new file.
-3. **If no** — validate the original as it is (the lint will still report the API_1
-   markers as errors; that's expected and informative).
+3. **If no** — validate the original as it is. The lint **does not flag API_1 syntax as
+   errors** (API_1 is valid, just legacy): it detects the script is API_1, emits one
+   advisory note, and runs the API-agnostic checks (geometry/loop/comprehension traps).
+   The API_2-specific checks (rate-set, `newRun`/`run` ordering, units/scale, `.Create()`)
+   are skipped because they're API_2-shaped — so **converting still buys fuller
+   validation**, but a clean API_1 script reports clean.
+
+   (API_1 markers in a file that *also* `import steps.interface` are **API_1↔2 mixing** —
+   not a pure API_1 script. That gets a **warning** for unsafe practice recommending a full
+   update to API_2. `import steps.interface` switches `steps.*` to the API_2 modules, so
+   hard API_1 usage — `steps.solver` imports, API_1 solver methods, API_1 constructors —
+   fails outright; a stray aliased import may still run but is confusing and fragile.)
 
 **Multi-file models** convert as a set — see *Multi-file models* below for finding the
 set. Conversion-specific points: produce one `*_api2.py` per source file and fix the
@@ -303,10 +313,12 @@ modeler declines both, note that the kinetics are unvalidated and stop.
 ### Generate a report
 
 For a substantial validation (a literature comparison, or a semantic review with
-several findings) — or whenever the modeler asks for a report — write it up as a file
-and offer a PDF. Write the report as **Markdown** (it doubles as a readable `.md`) and
-convert with the bundled helper, which renders to PDF in **pure Python via fpdf2** — no
-browser or system binaries:
+several findings) — or whenever the modeler asks for a report — write it up as a file.
+Write the report as **Markdown** (it doubles as a readable `.md`), then **render the PDF
+right away if a renderer is available** (a browser, or `fpdf2`) — don't stop at the `.md`
+and merely offer the PDF when you could just produce it. Only fall back to "here's the
+`.md`, render later" when **no** renderer is present (see the degrade note below). Convert
+with the bundled helper:
 
 ```bash
 pip install fpdf2                                    # once
