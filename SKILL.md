@@ -375,7 +375,10 @@ record the trap in the cardinal rules above, the `reference.md` common-errors ta
 and the debugging checklist below. Keep the validator and the docs in sync — the
 validator should catch every documented gotcha. **Bump [VERSION](VERSION)** in the same
 change (semver `MAJOR.MINOR.PATCH` — patch for fixes, minor for new checks/features, major
-for a breaking change) so other users' version check flags the update.
+for a breaking change) so other users' version check flags the update. A local pre-push
+hook enforces this: activate it once per clone with `git config core.hooksPath hooks` — it
+blocks a push that changes `SKILL.md`/`reference.md`/`validate_steps_script.py` without a
+`VERSION` bump (override a single push with `git push --no-verify`).
 
 ## Debugging checklist
 

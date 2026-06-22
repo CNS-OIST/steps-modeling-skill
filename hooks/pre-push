@@ -1,0 +1,23 @@
+#!/bin/sh
+# pre-push: require a VERSION bump when skill content changed vs origin/main.
+# It only reminds — you choose the number (semver: patch=fix, minor=feature, major=breaking).
+# Activate once per clone:  git config core.hooksPath hooks
+# Override a single push:    git push --no-verify
+# Test base can be overridden: VERSION_HOOK_BASE=<ref> hooks/pre-push
+base="${VERSION_HOOK_BASE:-origin/main}"
+
+# No base to compare against (fresh clone, base not fetched) → don't block.
+git rev-parse --verify -q "$base" >/dev/null 2>&1 || exit 0
+
+changed=$(git diff --name-only "$base"...HEAD)
+
+# Only care when substantive skill content changed.
+echo "$changed" | grep -qE '^(SKILL\.md|reference\.md|validate_steps_script\.py)$' || exit 0
+
+# VERSION already bumped on this branch → fine.
+echo "$changed" | grep -qx 'VERSION' && exit 0
+
+echo "pre-push blocked: skill content changed but VERSION was not bumped vs $base." >&2
+echo "  Bump VERSION (semver — patch=fix, minor=new check/feature, major=breaking), commit, re-push." >&2
+echo "  Skip this once with:  git push --no-verify" >&2
+exit 1
