@@ -10,19 +10,21 @@ duplicate-interface-triangle solver crashes, units).
 
 It's **markdown guidance + runnable Python**: cardinal rules and a cheatsheet the
 agent reads, working templates it adapts, and a validator script it runs to lint a
-model and to extract its kinetics for checking against the literature. Works with
-**Claude Code** as a first-class skill and with **any other AI agent** as reference
-context.
+model and to extract its kinetics for checking against the literature. It also
+**converts legacy API_1 scripts to API_2** (asking first, multi-file projects
+included). Works with **Claude Code** as a first-class skill and with **any other AI
+agent** as reference context.
 
 ## Contents
 
 **Docs (read by the agent):**
 - **[SKILL.md](SKILL.md)** — the skill: cardinal rules, the canonical script
-  skeleton, a semantic-review checklist, the *Validate against the literature*
-  procedure, and a debugging checklist. (Has the YAML frontmatter Claude Code needs.)
+  skeleton, the *API_1 → API_2 conversion* gate (ask first; multi-file projects),
+  a semantic-review checklist, the *Validate against the literature* procedure, and a
+  debugging checklist. (Has the YAML frontmatter Claude Code needs.)
 - **[reference.md](reference.md)** — full cheatsheet: solver table, model/geometry/
-  simulation/recording recipes, EField/complexes/MPI pointers, units, a literature
-  units → STEPS conversion crib, and a common-errors table.
+  simulation/recording recipes, EField/complexes/MPI pointers, units, an API_1 → API_2
+  conversion crib, a literature units → STEPS conversion crib, and a common-errors table.
 
 **Templates (adapted into new models), verified against STEPS 5.1.0:**
 - **[templates/well_mixed.py](templates/well_mixed.py)** — well-mixed model
@@ -123,9 +125,14 @@ git clone https://github.com/CNS-OIST/steps-modeling-skill.git \
 `.claude/skills/steps-modeling/` inside your project. Claude Code discovers it by the
 `name`/`description` in `SKILL.md` and loads it when you ask anything about STEPS
 modelling — e.g. *“write a STEPS model of calcium buffering in this mesh”*,
+*“convert this old API_1 STEPS script to API_2”*,
 *“check my model's rate constants against the Bhalla & Iyengar paper”*, or
 *“why does my Tetexact simulation crash with `i < 4`?”* The agent runs
 `validate_steps_script.py` itself; you can also run it by hand.
+
+The skill is versioned in [VERSION](VERSION); on first use it checks for a newer
+release upstream and tells you how to update (it can't update itself — `git pull` the
+clone, or automate it with a `SessionStart` hook that pulls the skill directory).
 
 ## Use with any other AI agent
 
