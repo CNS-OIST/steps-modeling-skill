@@ -25,7 +25,8 @@ there's no network.
 1. Read the local `VERSION` (in this skill's directory).
 2. Fetch the latest (one line; WebFetch the same URL if `curl` is unavailable):
    `curl -fsS https://raw.githubusercontent.com/CNS-OIST/steps-modeling-skill/main/VERSION`
-3. If they differ, tell the user a newer `steps-modeling` skill is out (show both
+3. If the upstream version is higher (semver compare), tell the user a newer
+   `steps-modeling` skill is out (show both
    versions) and how to update: `git -C <skill dir> pull` for a git checkout, or
    re-install / update the plugin otherwise. **The skill cannot update itself** — the
    files are read from disk at session start, so the user updates, then the next session
@@ -372,8 +373,9 @@ When you hit a STEPS scripting error this skill didn't prevent, **extend it in t
 same change**: add a check (with a self-test case) to `validate_steps_script.py`, and
 record the trap in the cardinal rules above, the `reference.md` common-errors table,
 and the debugging checklist below. Keep the validator and the docs in sync — the
-validator should catch every documented gotcha. **Bump [VERSION](VERSION)** (the date,
-`YYYY-MM-DD`) in the same change so other users' version check flags the update.
+validator should catch every documented gotcha. **Bump [VERSION](VERSION)** in the same
+change (semver `MAJOR.MINOR.PATCH` — patch for fixes, minor for new checks/features, major
+for a breaking change) so other users' version check flags the update.
 
 ## Debugging checklist
 
