@@ -378,7 +378,9 @@ change (semver `MAJOR.MINOR.PATCH` — patch for fixes, minor for new checks/fea
 for a breaking change) so other users' version check flags the update. A local pre-push
 hook enforces this: activate it once per clone with `git config core.hooksPath hooks` — it
 blocks a push that changes `SKILL.md`/`reference.md`/`validate_steps_script.py` without a
-`VERSION` bump (override a single push with `git push --no-verify`).
+`VERSION` bump (override a single push with `git push --no-verify`). **This hook is for
+maintainers/contributors of the skill only — skill *users* never need it** (they just
+install the skill and, optionally, run the version check above).
 
 ## Debugging checklist
 

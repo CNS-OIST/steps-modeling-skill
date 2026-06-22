@@ -1,5 +1,7 @@
 #!/bin/sh
 # pre-push: require a VERSION bump when skill content changed vs origin/main.
+# FOR SKILL MAINTAINERS/CONTRIBUTORS ONLY — skill users who just install and use the
+# skill never need this hook.
 # It only reminds — you choose the number (semver: patch=fix, minor=feature, major=breaking).
 # Activate once per clone:  git config core.hooksPath hooks
 # Override a single push:    git push --no-verify
