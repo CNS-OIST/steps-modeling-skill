@@ -159,19 +159,42 @@ solver methods. If the input is API_1:
 3. **If no** — validate the original as it is (the lint will still report the API_1
    markers as errors; that's expected and informative).
 
-**Multi-file models.** Real projects split across files (e.g. a `camodel.py` defining
-the model + geometry that a driver `import`s, plus the run script). Treat the whole set
-as one unit:
-- **Find the set** — follow local `import`s between project files; lint/convert every
-  STEPS file, not just the one named. The validator runs per file, so run it on each.
-- **Convert together, keep the split** — produce one `*_api2.py` per source file and fix
-  the inter-file imports (`import camodel` → `import camodel_api2`). API_2 objects name
-  themselves from their assignment, so a model built in one file is reached in another by
-  passing the **model object** (`gen_geom(mdl, ...)`; fetch systems via `mdl.vsys`) and by
-  sim-path/`MATCH` names — not by re-importing the Python objects.
-- **Reorder when API_2 demands it** — anything that adds to the mesh (e.g. `ROI`s built in
-  the driver) must run **before** `Simulation(...)`; the API_1 habit of creating ROIs and
-  setting counts after the solver exists has to move ahead of solver creation.
+**Multi-file models** convert as a set — see *Multi-file models* below for finding the
+set. Conversion-specific points: produce one `*_api2.py` per source file and fix the
+inter-file imports (`import camodel` → `import camodel_api2`); API_2 objects name
+themselves from their assignment, so a model built in one file is reached in another by
+passing the **model object** (`gen_geom(mdl, ...)`; fetch systems via `mdl.vsys`) and by
+sim-path/`MATCH` names, not by re-importing the Python objects; and **reorder** anything
+that adds to the mesh (e.g. `ROI`s built in the driver) to run *before* `Simulation(...)`
+— the API_1 habit of creating ROIs and setting counts after the solver must move ahead.
+
+## Multi-file models (applies to every tier below)
+
+A STEPS model is often split across files — a module defining the model/geometry, a
+driver that `import`s it and runs, maybe shared constants. Validation is about the
+*model*, not a file, so treat the whole file set as the unit in **every** tier (static
+lint, semantic review, literature):
+
+- **Find the set first.** Start from the file the modeler named and follow local
+  `import`s to the other project files (the driver imports the model module, etc.).
+  Validate them all, not just the one named.
+- **Static lint runs on every file at once** — `validate_steps_script.py model.py
+  driver.py constants.py` (it lints each and sums errors). Read the results **cross-file**:
+  a name defined or imported from a sibling module is not "undefined" (the linter is
+  per-file AST and can't see across — don't treat its silence or a missing symbol as
+  proof), and a flow that legitimately spans files (reactions in the model module,
+  `newRun()`/`run()` in the driver) is fine — judge run-ordering in the file that actually
+  drives the simulation.
+- **`--params` over the whole set, then combine.** `validate_steps_script.py --params
+  model.py driver.py` dumps each file; **merge the dumps** — reactions/diffusion usually
+  live in the model file, initial `Conc`/`Count` in the driver — into one picture before
+  the literature comparison. A reaction, rate, or species is only "missing" if it's absent
+  from *all* files.
+- **Semantic review over the union.** Walk the checklist across files together: a species
+  declared in the model file but initialised in the driver *is* initialised; a `Clamped`
+  set in the driver pins a model-file species; loop/comprehension and geometry-selection
+  traps live wherever the code is. Don't flag a file in isolation for something another
+  file supplies.
 
 ## Validate a script
 
@@ -179,7 +202,8 @@ Before running a STEPS script, lint it for the pitfalls above — no execution, 
 not required:
 
 ```bash
-python validate_steps_script.py model.py
+python validate_steps_script.py model.py            # one file
+python validate_steps_script.py model.py driver.py   # whole multi-file model at once
 ```
 
 It reports each issue with a concrete **fix**: import order / API_1↔API_2 mixing,

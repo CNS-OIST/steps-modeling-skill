@@ -96,10 +96,17 @@ Pure-Python, no execution of the model and **STEPS not required** (AST + regex o
 so it's safe to run in CI or a pre-run gate. Two modes:
 
 ```bash
-python validate_steps_script.py model.py        # lint: cardinal-rule + unit/scale checks
-python validate_steps_script.py --params model.py   # extract kinetics as a table
-python validate_steps_script.py --selftest       # check the checker
+python validate_steps_script.py model.py            # lint: cardinal-rule + unit/scale checks
+python validate_steps_script.py model.py driver.py  # multi-file model: lint the whole set
+python validate_steps_script.py --params model.py [driver.py ...]   # extract kinetics as a table
+python validate_steps_script.py --selftest          # check the checker
 ```
+
+**Multi-file models** (a module defining the model/geometry that a driver imports, etc.)
+are validated as one unit at every tier — pass all the files; the linter checks each and
+the agent reads results cross-file (a symbol defined in a sibling module isn't
+"undefined"; `--params` dumps are merged before the literature comparison). See
+SKILL.md → *Multi-file models*.
 
 - **Lint** flags import order / API_1↔API_2 mixing, `.Create()` source-line misuse
   (loops, comprehensions, no assignment), reserved Species names, unit & biological
