@@ -15,6 +15,22 @@ EField/complexes/parallel, ResultSelector recipes, mesh-from-pipeline notes). St
 from a [template](templates/) and adapt. The rules below are the ones you must not
 get wrong.
 
+## Staying current (version check)
+
+This skill is versioned in [VERSION](VERSION). **On first use in a session**, check
+whether a newer version is published and, if so, tell the user how to update — then
+continue either way. This is advisory: never block on it, and skip it under CI / when
+there's no network.
+
+1. Read the local `VERSION` (in this skill's directory).
+2. Fetch the latest (one line; WebFetch the same URL if `curl` is unavailable):
+   `curl -fsS https://raw.githubusercontent.com/CNS-OIST/steps-modeling-skill/main/VERSION`
+3. If they differ, tell the user a newer `steps-modeling` skill is out (show both
+   versions) and how to update: `git -C <skill dir> pull` for a git checkout, or
+   re-install / update the plugin otherwise. **The skill cannot update itself** — the
+   files are read from disk at session start, so the user updates, then the next session
+   picks it up. (The maintainer can automate the pull with a `SessionStart` hook.)
+
 ## Cardinal rules
 
 1. **Imports, in order.** `import steps.interface` FIRST, then star-import the
@@ -123,6 +139,39 @@ sim.memb.P.Count = 100
 sim.run(1.0)
 print(caConc.data[0, -1], 'at t =', caConc.time[0, -1])
 ```
+
+## API_1 input → ask before converting
+
+STEPS scripts come in two flavours. **API_1** (the legacy procedural interface) shows
+markers the validator already flags: `import steps.model as smodel` (aliased imports),
+`steps.solver` / `steps.mpi.solver`, and `sim.setCompConc(...)` / `getPatchCount(...)`
+solver methods. If the input is API_1:
+
+1. **Ask the modeler** whether to convert it to API_2 (`steps.interface`). Do not
+   convert silently — it's a rewrite, and they may want the original validated as-is.
+2. **If yes** — rewrite into a **new file** (`<name>_api2.py`, never overwrite the
+   original). Put a source reference as the first comment so the provenance is recorded:
+   ```python
+   # Converted to STEPS API_2 from: <original filename>
+   ```
+   Use the conversion crib in [reference.md](reference.md) → "API_1 → API_2 conversion".
+   Then validate the new file.
+3. **If no** — validate the original as it is (the lint will still report the API_1
+   markers as errors; that's expected and informative).
+
+**Multi-file models.** Real projects split across files (e.g. a `camodel.py` defining
+the model + geometry that a driver `import`s, plus the run script). Treat the whole set
+as one unit:
+- **Find the set** — follow local `import`s between project files; lint/convert every
+  STEPS file, not just the one named. The validator runs per file, so run it on each.
+- **Convert together, keep the split** — produce one `*_api2.py` per source file and fix
+  the inter-file imports (`import camodel` → `import camodel_api2`). API_2 objects name
+  themselves from their assignment, so a model built in one file is reached in another by
+  passing the **model object** (`gen_geom(mdl, ...)`; fetch systems via `mdl.vsys`) and by
+  sim-path/`MATCH` names — not by re-importing the Python objects.
+- **Reorder when API_2 demands it** — anything that adds to the mesh (e.g. `ROI`s built in
+  the driver) must run **before** `Simulation(...)`; the API_1 habit of creating ROIs and
+  setting counts after the solver exists has to move ahead of solver creation.
 
 ## Validate a script
 
@@ -284,7 +333,8 @@ When you hit a STEPS scripting error this skill didn't prevent, **extend it in t
 same change**: add a check (with a self-test case) to `validate_steps_script.py`, and
 record the trap in the cardinal rules above, the `reference.md` common-errors table,
 and the debugging checklist below. Keep the validator and the docs in sync — the
-validator should catch every documented gotcha.
+validator should catch every documented gotcha. **Bump [VERSION](VERSION)** (the date,
+`YYYY-MM-DD`) in the same change so other users' version check flags the update.
 
 ## Debugging checklist
 
