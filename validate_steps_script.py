@@ -13,7 +13,7 @@ prints a concrete **fix** suggestion:
   - newRun / toSave / run ordering
   - reaction rate constants (`r['k'].K`) declared but never set
 
-    python validate_steps_script.py model.py [more.py ...]   # or --selftest
+    python validate_steps_script.py model.py [more.py ... | folder/]   # or --selftest
 
 Each issue is (severity, line, problem, fix). Exit 0 if no ERRORs, 1 otherwise;
 WARNINGs never fail the run.
@@ -481,7 +481,32 @@ def _selftest():
     assert any(n == "Gallimore 2016, Table 1" for *_, n in dd["constants"]), "comment lost"
     assert [s[1] for s in dd["schemes"]] == ["name"], dd["schemes"]   # variable index
     assert dd["inits"][0][1:4] == ("c.PKCa", "Count", "0"), dd["inits"]  # aliased handle
+    # directory argument expands to the .py files inside, skipping __pycache__
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, "model.py"), "w").close()
+        os.makedirs(os.path.join(d, "__pycache__"))
+        open(os.path.join(d, "__pycache__", "cached.py"), "w").close()
+        ex = _expand([d, "literal.py"])
+        assert ex == [os.path.join(d, "model.py"), "literal.py"], ex
     print("selftest OK")
+
+
+def _expand(paths):
+    """Expand any directory argument to the .py files inside it (recursive, skipping
+    __pycache__), so the user can pass a model folder instead of every filename."""
+    out = []
+    for p in paths:
+        pp = pathlib.Path(p)
+        if pp.is_dir():
+            files = sorted(str(f) for f in pp.rglob("*.py")
+                           if "__pycache__" not in f.parts)
+            if not files:
+                sys.exit(f"no .py files found in directory: {p}")
+            out.extend(files)
+        else:
+            out.append(p)
+    return out
 
 
 def main(paths):
@@ -490,14 +515,14 @@ def main(paths):
     if paths and paths[0] == "--params":
         if len(paths) < 2:
             sys.exit("usage: python validate_steps_script.py --params model.py [...]")
-        for p in paths[1:]:
+        for p in _expand(paths[1:]):
             print_params(p)
         return
     if not paths:
         sys.exit("usage: python validate_steps_script.py model.py [...]   "
-                 "(or --params model.py, or --selftest)")
+                 "(or a folder, --params model.py, or --selftest)")
     total_err = 0
-    for p in paths:
+    for p in _expand(paths):
         issues = validate(p)
         errs = sum(1 for s, *_ in issues if s == "ERROR")
         total_err += errs

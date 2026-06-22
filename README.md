@@ -98,7 +98,8 @@ so it's safe to run in CI or a pre-run gate. Two modes:
 ```bash
 python validate_steps_script.py model.py            # lint: cardinal-rule + unit/scale checks
 python validate_steps_script.py model.py driver.py  # multi-file model: lint the whole set
-python validate_steps_script.py --params model.py [driver.py ...]   # extract kinetics as a table
+python validate_steps_script.py model_dir/          # or just pass the folder (every .py inside)
+python validate_steps_script.py --params model.py [driver.py ... | folder/]   # extract kinetics
 python validate_steps_script.py --selftest          # check the checker
 ```
 

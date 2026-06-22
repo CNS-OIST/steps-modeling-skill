@@ -179,7 +179,9 @@ lint, semantic review, literature):
   `import`s to the other project files (the driver imports the model module, etc.).
   Validate them all, not just the one named.
 - **Static lint runs on every file at once** — `validate_steps_script.py model.py
-  driver.py constants.py` (it lints each and sums errors). Read the results **cross-file**:
+  driver.py constants.py`, or just pass the **folder** (`validate_steps_script.py
+  model_dir/`) to lint every `.py` inside (recursive, skipping `__pycache__`). It lints
+  each and sums errors. Read the results **cross-file**:
   a name defined or imported from a sibling module is not "undefined" (the linter is
   per-file AST and can't see across — don't treat its silence or a missing symbol as
   proof), and a flow that legitimately spans files (reactions in the model module,
@@ -204,6 +206,7 @@ not required:
 ```bash
 python validate_steps_script.py model.py            # one file
 python validate_steps_script.py model.py driver.py   # whole multi-file model at once
+python validate_steps_script.py model_dir/           # a folder: lints every .py inside
 ```
 
 It reports each issue with a concrete **fix**: import order / API_1↔API_2 mixing,
