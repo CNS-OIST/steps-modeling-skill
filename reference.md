@@ -245,3 +245,22 @@ literature"), papers rarely use STEPS units. Convert before judging a mismatch:
 
 Quick sanity: a diffusion-limited kon is ~1e8–1e9 M⁻¹·s⁻¹; cytosolic D ≈ 1e-13–1e-9 m²/s
 (small ion ~2e-10, protein ~1e-11). Anything far outside is a unit error, not biology.
+
+## Reusability smells (SKILL.md → "Reusability review")
+
+Signals that a model is calibrated to one operating point, not mechanistic — so it
+reproduces its figure but breaks on reuse. All are **intrinsic** (read from the script
+alone, no reference model needed) and the validator flags the first three as advisories:
+
+| Smell | What it means for reuse | Validator flag |
+|---|---|---|
+| `Clamped = True` species | infinite reservoir → results tied to this volume / copy-number | yes |
+| `k_eff = kcat/Km` rate | valid only if [S] ≪ Km; compute [S]/Km from the script's own counts ÷ volume vs Km | yes |
+| param comment tying it to an output ("reproduces the paper's ~56 %") | calibrated, not derived → bounds the reuse envelope | yes |
+| init by `.Count` (not `.Conc`) | counts are geometry-specific → won't rescale to another mesh/volume | review only |
+| zones-as-species + diffusion-as-first-order-reaction | well-mixed standing in for spatial → can't be spatialised as-is | review only |
+| compensating errors (several approximations cancel only at the fit point) | model right for the wrong reasons | probe: run one off-calibration point |
+
+Reuse axes to score: re-run published scenario · perturbation/knockout · rescale
+(copy-number, volume) · spatialise (well-mixed→mesh) · couple upstream · per-component
+quantitative claim. Advisory tier — report the calibration envelope, don't fail the run.

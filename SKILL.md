@@ -249,8 +249,11 @@ python validate_steps_script.py model_dir/           # a folder: lints every .py
 It reports each issue with a concrete **fix**: import order / API_1↔API_2 mixing,
 `.Create()` misuse (loops, no assignment), reserved Species names, **units &
 biological scale** (Conc is molar, Diffusion in m²/s, mesh `scale=`),
-newRun/toSave/run ordering, and reaction rates declared but never set. Exit code is
-non-zero on ERRORs (so it fits a pre-run / CI gate); `--selftest` checks the checker.
+newRun/toSave/run ordering, and reaction rates declared but never set. It also emits
+**reusability advisories** (WARNING, never fail) — clamped pools, `k_eff = kcat/Km`
+linearisation, parameters tuned to a published output — that feed the *Reusability
+review* tier below. Exit code is non-zero on ERRORs (so it fits a pre-run / CI gate);
+`--selftest` checks the checker.
 
 ## Semantic review (beyond static linting)
 
@@ -400,6 +403,65 @@ report), **ask the modeler for permission before modifying the script** — list
 exact fixes you propose and wait for a yes. This applies to every tier (lint, semantic,
 literature). **If the modeler declines, stop at the report** — leave the script
 untouched. Only apply fixes you've been explicitly cleared to make.
+
+## Reusability review (will the model survive being reused?)
+
+A model that reproduces its paper's figure can still be **calibrated to one operating
+point** — a single volume, copy-number, and protocol — rather than mechanistic. Then it
+replays *that* scenario but breaks the moment it's reused: a perturbation, a different
+copy-number/volume, spatialising a well-mixed model, or coupling to an upstream input.
+This tier asks: **outside the point it was built for, does it still hold?**
+
+This is **intrinsic** — assess it from the script itself; it needs **no reference model or
+ground truth** (most STEPS models have none, and parameters are legitimately assembled
+from several papers). Ground truth, *when it exists*, is only a strengthener (see end).
+The static validator already surfaces three reusability advisories (WARNING, never fail):
+clamped pools, `k_eff = kcat/Km` linearisation, and a parameter whose comment ties it to a
+published output. Treat them as prompts and walk this checklist:
+
+- **Scale-locking — the STEPS-specific one.** Is the model pinned to its current size?
+  - `Clamped = True` species are **infinite reservoirs**: results are tied to this volume
+    and copy-number. Intended (emulating an S1-style infinite pool) or a hidden assumption?
+  - Initial state set by **`.Count`** is geometry-specific; **`.Conc`** rescales. A
+    count-initialised model won't port to another mesh/volume without re-deriving counts.
+  - A single hard-coded volume / mesh path / molecule number → one operating point.
+- **Approximation validity *in this model's own regime*.** Every lumped or effective rate
+  has a condition; check it against the script's **own** numbers, not a reference:
+  - `k_eff = kcat/Km` is exact only when **[S] ≪ Km**. Both [S] (counts ÷ volume) and Km are
+    in the script — compute [S]/Km. If [S] ≳ Km the rate is overestimated and saturation is
+    lost, and the error grows **nonlinearly on rescale** (so it won't spatialise either).
+  - A **well-mixed model standing in for a spatial one** (zones encoded as species suffixes,
+    diffusion written as first-order reactions) reproduces the bulk curve but cannot be
+    spatialised as-is — note it.
+- **Calibration smells.** Parameters tuned to *hit an output* (env-var knobs, fudge factors,
+  uncited round numbers, a comment like "reproduces the paper's ~56 %") bound the reuse
+  envelope. The danger is **compensating errors**: several approximations that cancel only
+  at the fit point. The model is right there for the wrong internal reasons.
+- **Probe it without ground truth.** Run **one off-calibration point** — a perturbation /
+  dose / knockout the source itself reports, or just sweep a parameter. If the model only
+  matches at the calibrated point, it's overfit. (This reuses the optional smoke-test
+  machinery; it needs the model to run, not a reference model.)
+- **Ground truth = optional strengthener.** *If* a reference model / canonical source exists
+  (e.g. a COPASI `.cps`, a prior model the script ports), diff the parameters to catch
+  compensating-error calibration directly. If none exists, you do **not** skip this tier —
+  the intrinsic checks above plus the off-point probe stand on their own; you flag the
+  *risk* rather than prove the divergence.
+
+**Write it up as a reuse verdict, not a pass/fail** (it's advisory, like the literature
+tier). State the **calibration envelope** the model is valid within, then score the reuse
+axes:
+
+| Reuse axis | Survives? | Why (tie to a finding above) |
+|---|---|---|
+| Re-run the published scenario | usually ✓ | it's what was calibrated |
+| Perturbation / knockout / dose | ? | breaks if a flagged approximation or a tuned param carries the result |
+| Rescale (copy-number, volume) | ? | breaks on `Clamped` reservoirs, `.Count` init, or [S]/Km shifting |
+| Spatialise (well-mixed → mesh) | ? | breaks on diffusion-as-reaction / zones-as-species / non-saturating rates |
+| Couple to an upstream model | ? | breaks if inputs are clamped/hard-coded rather than driven |
+| Per-component quantitative claim | ? | breaks if that component's rate is a lumped approximation |
+
+Keep the framing honest: a calibrated model is **fine for its published purpose** — the
+reusability review just documents the envelope so the next user doesn't reuse it blind.
 
 ## Execution smoke-test (optional final gate — only on request)
 

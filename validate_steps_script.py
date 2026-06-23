@@ -527,14 +527,65 @@ def _api1_notice(lines):
              "(the skill does this)")]
 
 
+def _reusability_checks(src):
+    """Advisory only (never fail), and INTRINSIC: every signal is read from the script
+    itself — no reference model / ground truth required, so it runs on ANY STEPS script.
+    These flag that a model is CALIBRATED to one operating point (a volume, a copy-number,
+    a protocol) rather than mechanistic, which limits REUSE — perturbation, rescaling to
+    other copy-numbers/volumes, spatialising a well-mixed model, or coupling upstream.
+    One WARNING per category, keyed to a single line, to stay low-noise. Prompts for the
+    reusability review, not bugs."""
+    out = []
+    lines = src.splitlines()
+    # 1) Clamped pools = infinite reservoirs — the most general STEPS scale-lock signal.
+    #    API_2: `<spec>.Clamped = True`; API_1: `sim.setCompClamped('c','X',True)` (and Patch/Tet/
+    #    Tri/ROI variants). Species clamps only — voltage clamps (setVertVClamped/.VClamped) are a
+    #    boundary condition, not a reservoir, so they're deliberately excluded.
+    clamps = [i for i, ln in enumerate(lines, 1)
+              if re.search(r"\bClamped\s*=\s*True\b", ln)
+              or re.search(r"\.set(Comp|Patch|Tet|Tri|ROI)Clamped\s*\([^)]*\bTrue\b", ln)]
+    if clamps:
+        out.append(("WARNING", clamps[0],
+            f"reusability: {len(clamps)} Clamped=True assignment(s) hold species constant "
+            "(infinite reservoir). Results are tied to this volume/copy-number; clamps emulating "
+            "'infinite pools' make the model non-reusable at other scales without re-tuning",
+            "document the calibration envelope (volume, copy number, protocol), or model the pools "
+            "as finite species so the model rescales / spatialises correctly"))
+    # 2) Effective enzyme kinetics linearised as k_eff = kcat/Km — exact only when [S] << Km.
+    #    Both [S] (counts & volume) and Km live in the script, so the regime is checkable here.
+    for i, ln in enumerate(lines, 1):
+        if re.search(r"(?i)k_?eff\s*=\s*kcat\s*/\s*k_?m|kcat\s*/\s*k_?m\b", ln):
+            out.append(("WARNING", i,
+                "reusability: enzyme kinetics linearised as k_eff=kcat/Km — exact only when "
+                "[S]<<Km. If [S]≳Km it overestimates turnover and ignores saturation, and the "
+                "error changes nonlinearly on rescale (limits reuse across scales / in space)",
+                "compute [S]/Km from this model's own counts, volume and Km; if not <<1 use a "
+                "saturating MM rate (VDepRate / explicit enzyme-substrate complex) for reuse"))
+            break
+    # 3) A parameter tuned to reproduce a published output (calibration, not derivation).
+    for i, ln in enumerate(lines, 1):
+        c = ln.split('#', 1)[1] if '#' in ln else ''
+        if c and re.search(r"(?i)(reproduc|match|calibrat|tune|to\s+hit|fudge).{0,60}"
+                           r"(paper|published|fig(ure)?\s*\d|table\s*\d|\d+\s*%|percent|target)", c):
+            out.append(("WARNING", i,
+                "reusability: a parameter looks tuned to reproduce a published output "
+                "(calibration), not derived from a source — calibrated values bound the reuse envelope",
+                "note which output was fit and at what operating point; reuse outside that envelope "
+                "(perturbation, rescale, coupling) needs re-fitting, not just reuse"))
+            break
+    return out
+
+
 def validate_source(src):
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
         return [("ERROR", e.lineno or 0, f"syntax error: {e.msg}", "fix the syntax error")]
     lines = src.splitlines()
-    # API-agnostic structural checks run for both APIs.
-    agnostic = _comprehension_checks(tree) + _loop_checks(tree) + _geometry_checks(tree)
+    # API-agnostic structural checks run for both APIs. Reusability advisories are intrinsic
+    # (read the script only) and API-agnostic, so they run for both dialects too.
+    agnostic = (_comprehension_checks(tree) + _loop_checks(tree) + _geometry_checks(tree)
+                + _reusability_checks(src))
     if _is_api1(lines):
         # Pure API_1: its syntax is valid, so don't report it as errors — note it, then run
         # every check whose CONCEPT is API-agnostic. Rate-completeness is one of those (the
@@ -586,6 +637,23 @@ def _selftest():
     # half-space test must NOT trip the geometry check
     assert not any("rarely matches" in p for _, _, p, _ in
                    validate_source("xs = [t for t in surf if t.center.y <= 0]\n")), "geo false-positive"
+    # reusability advisories — intrinsic (no ground truth), never errors, one per category
+    reuse = validate_source(
+        "import steps.interface\nfrom steps.model import *\n"
+        "K_PP2A = 0.6 / 7.8e-6   # k_eff = kcat/Km\n"          # linearisation smell
+        "sim.comp.GRIP.Clamped = True\n"                       # clamped reservoir smell
+        "NSF = 1.0e-6   # reproduces the paper's ~56% depression\n")  # calibration smell
+    rp = [p for _, _, p, _ in reuse]
+    assert any("kcat/Km" in p for p in rp), f"reuse kcat/Km missed: {reuse}"
+    assert any("reservoir" in p for p in rp), f"reuse clamp missed: {reuse}"
+    assert any("tuned to reproduce" in p for p in rp), f"reuse calibration missed: {reuse}"
+    assert all(s == "WARNING" for s, *_ in reuse), f"reusability must be advisory: {reuse}"
+    # a plain model with none of the smells stays clean (no reusability false positives)
+    assert not _reusability_checks("sim.comp.Ca.Conc = 1e-6\nr['bind'].K = 1e6, 0.7\n")
+    # API_1 species clamp is caught too; a voltage clamp (BC, not a reservoir) is NOT
+    assert any("reservoir" in p for _, _, p, _ in
+               _reusability_checks("sim.setCompClamped('vsys','NO',True)\n")), "API_1 clamp missed"
+    assert not _reusability_checks("sim.setVertVClamped(v, True)\n"), "voltage clamp wrongly flagged"
     # --params extraction picks up scheme, rate, diffusion, and initial condition
     pp = extract_params("A + B <r['bind']> C\nr['bind'].K = 1e6, 0.7  # Smith 2020\n"
                         "Diffusion(Ca, 2e-10)\nsim.cyt.Ca.Conc = 150e-6\n")
