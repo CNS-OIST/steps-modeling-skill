@@ -193,6 +193,7 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | aggregation reads only the last element (silent) | comprehension's first iterable uses a name bound by a later `for` (`(t for t in m.tets for m in mitos)`) | reorder: `for m in mitos for t in m.tets` |
 | boundary tris/tets selection comes out empty/wrong | exact float `==`/`in` on geometry (`tri.center.y in [bbox.max.y]`) never matches | tolerance `abs(a-b) < eps` or half-space `tri.center.y >= z0` |
 | geometry setup is O(n²) / a list is recomputed | a `for x in seq:` whose body ignores `x` and rebuilds a comprehension over `seq` | drop the stray loop; compute the comprehension once |
+| pulse train behaves as a constant input (no gaps) | pulse duration ≥ inter-pulse interval (1/freq) — fixed-width pulses reused at higher frequency overlap | ensure `duration < 1/freq` per frequency; narrow the pulse at high freq (e.g. 80 ms @ 10 Hz vs 200 ms) |
 
 ## API_1 → API_2 conversion
 
