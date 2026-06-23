@@ -252,6 +252,43 @@ biological scale** (Conc is molar, Diffusion in m²/s, mesh `scale=`),
 newRun/toSave/run ordering, and reaction rates declared but never set. Exit code is
 non-zero on ERRORs (so it fits a pre-run / CI gate); `--selftest` checks the checker.
 
+## Execution smoke-test (optional — runs the model, only if STEPS is installed)
+
+**Where it sits:** static lint *reads* the code; this **runs** it briefly. It is the
+*dynamic half of the mechanical tier* — same certainty (it either builds-and-steps or it
+doesn't) — slotted **right after static lint, before semantic/literature**: there's no
+point doing a careful meaning + literature review of a model that crashes on step one. It
+catches the disjoint class no static check can — solver-setup crashes, runtime assertions,
+build/import errors. (Real case: a model passed lint clean, then died at the first step
+with a Wmrssa `cur_node < max_node` assertion on STEPS 5.1 — only a run finds that.) Unlike
+static lint it is **opt-in and environment-gated**: it needs STEPS installed, spends
+compute, and is the only tier that executes the script's code.
+
+1. **Detect.** `validate_steps_script.py --check-env` → exit 0 + version if STEPS imports,
+   exit 2 otherwise. Run it with the interpreter where STEPS lives — often a venv, e.g.
+   `~/steps_venv/bin/python validate_steps_script.py --check-env`.
+2. **Ask first — always.** If STEPS is importable, *offer* the smoke-test; never run it
+   unprompted (it executes the script's code and can be heavy): *"STEPS 5.1 is available —
+   want me to do a short run to confirm the model builds and steps without crashing?"* Only
+   on **yes**. Skip silently under CI / non-interactive.
+3. **Short run, not the full protocol.** Build model + geometry, create the solver the
+   script uses, set its initial conditions, and run a **few sim-seconds** — enough to clear
+   solver setup and a handful of steps. Do **not** reproduce the paper's protocol (the goal
+   is "does it build and step," not results); cut time / iterations / pulses aggressively,
+   record one observable to confirm state advances, wrap in try/except. Practical notes
+   (learned on real models):
+   - Solver setup for a big network is a one-time cost (tens of seconds for thousands of
+     reactions) — expected, not a hang.
+   - A heavy stimulus/drive phase is the expensive part — keep it short or skip it.
+   - If the solver crashes at setup/first step, retry with a more robust solver (well-mixed:
+     `Wmdirect` instead of `Wmrssa`) to tell a **model** bug from a **solver/version** issue,
+     and report which it was.
+4. **Report.** Pass = "built + stepped N s, counts evolve, no exception." Fail = the first
+   exception with its fix (e.g. *Wmrssa asserts on 5.1 → use Wmdirect*, or the real model
+   bug). Fold it into the validation report as an **Execution** line. A smoke-test confirms
+   the model **runs**, not that it is scientifically correct — that is still semantic +
+   literature.
+
 ## Semantic review (beyond static linting)
 
 The validator catches mechanical errors; some bugs need a **read of the model's
@@ -428,3 +465,8 @@ install the skill and, optionally, run the version check above).
   boundary patch created with `outer=None`; that patch can only host `.i`/`.s` species.
 - Counts all zero after a run → reaction `K` too small, or the volume reactant's
   density at the surface is ~0; raise `K` or `Count`, or check units (`Conc` is molar).
+- `Assertion Fail: cur_node < max_node` (`wmrssa.cpp`) at/just after solver setup → the
+  **Wmrssa** (rejection-SSA) solver tripping on a large/legacy network (seen running an
+  old STEPS-3.x model under 5.1). Switch the well-mixed solver to **`Wmdirect`** (exact
+  direct method, more robust, ~slower); if Wmdirect runs cleanly it was a solver/version
+  issue, not a model bug. This is the kind of thing only the execution smoke-test catches.

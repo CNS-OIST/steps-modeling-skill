@@ -653,6 +653,10 @@ def _selftest():
     assert any("100" in p and "dcst" in p for p in scp), f"dcst µm²/s mistake not caught: {sc}"
     assert not any("5e-05" in p for p in scp), "µM-range Conc wrongly flagged"  # 50e-6 = 5e-05 M
     assert not any("2e-10" in p for p in scp), "valid dcst wrongly flagged"
+    # environment detection for the optional execution smoke-test: returns (bool, str),
+    # never raises (a broken STEPS build must report cleanly, not crash the validator)
+    ok, info = steps_available()
+    assert isinstance(ok, bool) and isinstance(info, str), (ok, info)
     # API_1 markers WITH an interface import = unsafe mixing → a WARNING recommending API_2,
     # NOT an error (and not the pure-API_1 advisory either)
     mix = validate_source("import steps.interface\nimport steps.model as smod\n")
@@ -686,9 +690,27 @@ def _expand(paths):
     return out
 
 
+def steps_available():
+    """Detect whether STEPS is importable in the current environment. Returns
+    (ok, version_or_error). The skill uses this to decide whether to OFFER an
+    optional execution smoke-test (a short run that catches solver-setup crashes
+    and runtime assertions static analysis can't see). Detection only — it does
+    NOT run anything."""
+    try:
+        import steps
+        return True, getattr(steps, "__version__", "?")
+    except BaseException as e:                # ImportError, or a build/loader error
+        msg = (str(e) or type(e).__name__).splitlines()[0]
+        return False, msg
+
+
 def main(paths):
     if paths == ["--selftest"]:
         return _selftest()
+    if paths == ["--check-env"]:
+        ok, info = steps_available()
+        print(f"STEPS importable: {'yes, v' + info if ok else 'no (' + info + ')'}")
+        sys.exit(0 if ok else 2)
     if paths and paths[0] == "--params":
         if len(paths) < 2:
             sys.exit("usage: python validate_steps_script.py --params model.py [...]")
@@ -697,7 +719,7 @@ def main(paths):
         return
     if not paths:
         sys.exit("usage: python validate_steps_script.py model.py [...]   "
-                 "(or a folder, --params model.py, or --selftest)")
+                 "(or a folder, --params model.py, --check-env, or --selftest)")
     total_err = 0
     for p in _expand(paths):
         issues = validate(p)
