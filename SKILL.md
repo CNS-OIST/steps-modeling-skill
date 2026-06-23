@@ -170,10 +170,21 @@ solver methods. If the input is API_1:
    Keep the original untouched as the reference of record.
 3. **If no** — validate the original as it is. The lint **does not flag API_1 syntax as
    errors** (API_1 is valid, just legacy): it detects the script is API_1, emits one
-   advisory note, and runs the API-agnostic checks (geometry/loop/comprehension traps).
-   The API_2-specific checks (rate-set, `newRun`/`run` ordering, units/scale, `.Create()`)
-   are skipped because they're API_2-shaped — so **converting still buys fuller
-   validation**, but a clean API_1 script reports clean.
+   advisory note, and runs every check whose **concept is API-agnostic** —
+   geometry/loop/comprehension traps **and reaction rate-completeness** (a reaction with no
+   rate constant defaults to 0 and never fires; for API_1 this is a missing `.kcst` or the
+   `Rx = <number>` clobber typo — the counterpart of the API_2 `r[..].K` unset-rate check).
+   Only the **genuinely version-specific** checks are skipped: `.Create()` source-line magic,
+   `newRun`/`run` ordering, and the API_2-shaped `Conc`/`Diffusion`/`scale=` unit reads.
+   So **converting still buys the unit/scale checks**, but a clean API_1 script reports clean.
+
+   **Principle: a check that the API_2 path runs should also run for API_1 unless it is
+   genuinely API-version-specific.** A bug like an unset rate is the same bug in both
+   dialects; don't make the modeler convert just to surface it. When you add an API_2 check,
+   ask whether its *concept* is agnostic — if so, give it an API_1 spelling too (as
+   `_api1_reaction_checks` does for rates) rather than leaving it behind the conversion gate.
+   (Still-pending agnostic ports: reserved-name and unit/scale checks for API_1 `smodel.Spec`
+   / `setCompConc` — contributions welcome.)
 
    (API_1 markers in a file that *also* `import steps.interface` are **API_1↔2 mixing** —
    not a pure API_1 script. That gets a **warning** for unsafe practice recommending a full
