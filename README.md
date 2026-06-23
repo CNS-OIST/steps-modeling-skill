@@ -42,9 +42,9 @@ agent** as reference context.
 
 ## Validation hierarchy
 
-The skill validates a model in three tiers, cheap-and-mechanical first, each gating
+The skill validates a model in four tiers, cheap-and-mechanical first, each gating
 the next. Earlier tiers are certain and automatable; later ones need a read of the
-model's meaning and, finally, the outside world.
+model's meaning, the outside world, and finally whether the model survives reuse.
 
 ```
    model.py
@@ -82,7 +82,19 @@ model's meaning and, finally, the outside world.
 │      SOFT  values that legitimately differ (species/temp/prep/lab)   │
 │            → advisory suggestion + citation, not a failure           │
 └─────────────────────────────────────────────────────────────────────┘
-      │   (interactive only — skip tiers 2–3 under CI; static lint is the CI gate)
+      │  passes
+      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. REUSABILITY REVIEW   intrinsic · no ground truth needed           │
+│    is it calibrated to one operating point, or reusable?             │
+│    validator advisories: clamped pools (infinite reservoirs),        │
+│      k_eff=kcat/Km linearisation, params tuned to a published output │
+│    review: scale-locking (.Count vs .Conc), approximation validity   │
+│      in this model's own regime, well-mixed-as-spatial, calibration  │
+│    probe: run one off-calibration point to expose overfit            │
+│    → calibration envelope + per-axis reuse verdict (advisory)        │
+└─────────────────────────────────────────────────────────────────────┘
+      │   (interactive only — skip tiers 2–4 under CI; static lint is the CI gate)
       ▼  report_to_pdf.py report.md report.pdf   (browser→HTML, else fpdf2, else .md)
    PDF report  (verdict · comparison tables · HARD/ADVISORY findings · sources)
       │
