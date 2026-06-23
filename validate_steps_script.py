@@ -527,9 +527,16 @@ def _api1_notice(lines):
              "(the skill does this)")]
 
 
+# A reusability scan must decide how it treats comments. There are exactly two cases — pick
+# ONE by calling the matching helper below, so the choice is explicit at every scan site:
+#   _code_only(ln) : CODE-PRESENCE smell (a real statement, e.g. a clamp). Strip comments; a
+#                    commented-out statement is disabled and must not fire.
+#   _live_line(ln) : ANNOTATION-DRIVEN smell whose marker usually lives in a trailing comment
+#                    (`K = ...  # k_eff = kcat/Km`). Read the whole line, but skip lines that
+#                    are entirely a comment (nothing live to flag).
 def _code_only(ln):
-    """Drop a trailing `# comment` from one line, ignoring '#' inside quotes, so code-matching
-    scans never fire on commented-out statements. Single-line; not for multi-line strings."""
+    """CODE-PRESENCE scans: drop a trailing `# comment`, quote-aware so a '#' inside a string
+    literal isn't treated as a comment. Single-line; not for multi-line strings."""
     quote = None
     for i, c in enumerate(ln):
         if quote:
@@ -540,6 +547,12 @@ def _code_only(ln):
         elif c == "#":
             return ln[:i]
     return ln
+
+
+def _live_line(ln):
+    """ANNOTATION-DRIVEN scans: return the full line (code + comment), or None if the line is
+    entirely a comment — i.e. nothing is live, so the scan should skip it."""
+    return None if ln.lstrip().startswith("#") else ln
 
 
 def _reusability_checks(src):
@@ -570,11 +583,10 @@ def _reusability_checks(src):
     # 2) Effective enzyme kinetics linearised as k_eff = kcat/Km — exact only when [S] << Km.
     #    Both [S] (counts & volume) and Km live in the script, so the regime is checkable here.
     for i, raw in enumerate(lines, 1):
-        if raw.lstrip().startswith("#"):   # whole statement disabled — not a live smell
+        ln = _live_line(raw)               # annotation-driven: keep the comment, skip if all-comment
+        if ln is None:
             continue
-        # NB: read the full line (code + annotation) — the smell is usually in a comment
-        # like `K = kcat/Km  # k_eff` since bare arithmetic can't reveal it.
-        if re.search(r"(?i)k_?eff\s*=\s*kcat\s*/\s*k_?m|kcat\s*/\s*k_?m\b", raw):
+        if re.search(r"(?i)k_?eff\s*=\s*kcat\s*/\s*k_?m|kcat\s*/\s*k_?m\b", ln):
             out.append(("WARNING", i,
                 "reusability: enzyme kinetics linearised as k_eff=kcat/Km — exact only when "
                 "[S]<<Km. If [S]≳Km it overestimates turnover and ignores saturation, and the "
