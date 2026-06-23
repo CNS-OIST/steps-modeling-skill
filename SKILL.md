@@ -401,6 +401,42 @@ exact fixes you propose and wait for a yes. This applies to every tier (lint, se
 literature). **If the modeler declines, stop at the report** — leave the script
 untouched. Only apply fixes you've been explicitly cleared to make.
 
+## Execution smoke-test (optional final gate — only on request)
+
+**The skill does not depend on STEPS.** Static lint + semantic + literature are the
+validation; they need nothing installed. This is a *bonus* tier, last and entirely
+optional: actually running the model in STEPS to confirm it builds and steps. It is **not
+a gate that judges the model** — a runtime failure is often **version-specific, not a
+script error** (a STEPS-3.x model can hit a Wmrssa `cur_node < max_node` assertion under
+5.1 yet be perfectly correct; the remedy is "run it on the STEPS version it targets," not
+"edit the script"). So never let a failed run condemn an otherwise-clean model, and never
+treat STEPS as required.
+
+Order matters — **ask first, only then touch the environment:**
+
+1. **Offer it (after the static/semantic/literature report).** *"Want me to also run the
+   model in STEPS as a final check that it builds and steps? (optional — needs STEPS
+   installed)."* Do **not** probe for STEPS as part of the normal flow, and skip the offer
+   under CI / non-interactive.
+2. **Only on yes, detect.** `validate_steps_script.py --check-env` (exit 0 + version if
+   STEPS imports, exit 2 otherwise) — run it with the interpreter where STEPS lives, often
+   a venv (`~/steps_venv/bin/python ... --check-env`). If STEPS isn't found, say so and
+   stop (suggest the modeler point you at their STEPS env or the version the model targets);
+   do not install anything.
+3. **Short run, not the full protocol.** Build model + geometry, create the solver the
+   script uses, set its initial conditions, run a **few sim-seconds** — enough to clear
+   solver setup and a handful of steps; cut time / iterations / pulses aggressively (the
+   goal is "builds and steps," not results). Notes from real runs: solver setup for a big
+   network is a one-time cost (tens of seconds for thousands of reactions); a heavy
+   stimulus phase is the expensive part — keep it short. If the solver asserts at
+   setup/first step, retry a more robust solver (well-mixed: `Wmdirect` for `Wmrssa`) — if
+   that runs, it was a **solver/version** issue, not a model bug, and that's the headline.
+4. **Report it as what it is.** An *Execution* line: "ran N s on STEPS x.y, no exception"
+   (pass), or the first exception **labelled** model-bug vs version/solver issue with the
+   remedy. A pass confirms the model **runs**; it says nothing about scientific correctness
+   (still semantic + literature). A version-specific failure is a note, **not** a finding
+   against the model.
+
 ## Maintaining this skill
 
 When you hit a STEPS scripting error this skill didn't prevent, **extend it in the
@@ -428,3 +464,8 @@ install the skill and, optionally, run the version check above).
   boundary patch created with `outer=None`; that patch can only host `.i`/`.s` species.
 - Counts all zero after a run → reaction `K` too small, or the volume reactant's
   density at the surface is ~0; raise `K` or `Count`, or check units (`Conc` is molar).
+- `Assertion Fail: cur_node < max_node` (`wmrssa.cpp`) at/just after solver setup → the
+  **Wmrssa** (rejection-SSA) solver tripping on a large/legacy network (seen running an
+  old STEPS-3.x model under 5.1). Switch the well-mixed solver to **`Wmdirect`** (exact
+  direct method, more robust, ~slower); if Wmdirect runs cleanly it was a solver/version
+  issue, not a model bug. This is the kind of thing only the execution smoke-test catches.
