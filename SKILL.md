@@ -252,43 +252,6 @@ biological scale** (Conc is molar, Diffusion in m²/s, mesh `scale=`),
 newRun/toSave/run ordering, and reaction rates declared but never set. Exit code is
 non-zero on ERRORs (so it fits a pre-run / CI gate); `--selftest` checks the checker.
 
-## Execution smoke-test (optional — runs the model, only if STEPS is installed)
-
-**Where it sits:** static lint *reads* the code; this **runs** it briefly. It is the
-*dynamic half of the mechanical tier* — same certainty (it either builds-and-steps or it
-doesn't) — slotted **right after static lint, before semantic/literature**: there's no
-point doing a careful meaning + literature review of a model that crashes on step one. It
-catches the disjoint class no static check can — solver-setup crashes, runtime assertions,
-build/import errors. (Real case: a model passed lint clean, then died at the first step
-with a Wmrssa `cur_node < max_node` assertion on STEPS 5.1 — only a run finds that.) Unlike
-static lint it is **opt-in and environment-gated**: it needs STEPS installed, spends
-compute, and is the only tier that executes the script's code.
-
-1. **Detect.** `validate_steps_script.py --check-env` → exit 0 + version if STEPS imports,
-   exit 2 otherwise. Run it with the interpreter where STEPS lives — often a venv, e.g.
-   `~/steps_venv/bin/python validate_steps_script.py --check-env`.
-2. **Ask first — always.** If STEPS is importable, *offer* the smoke-test; never run it
-   unprompted (it executes the script's code and can be heavy): *"STEPS 5.1 is available —
-   want me to do a short run to confirm the model builds and steps without crashing?"* Only
-   on **yes**. Skip silently under CI / non-interactive.
-3. **Short run, not the full protocol.** Build model + geometry, create the solver the
-   script uses, set its initial conditions, and run a **few sim-seconds** — enough to clear
-   solver setup and a handful of steps. Do **not** reproduce the paper's protocol (the goal
-   is "does it build and step," not results); cut time / iterations / pulses aggressively,
-   record one observable to confirm state advances, wrap in try/except. Practical notes
-   (learned on real models):
-   - Solver setup for a big network is a one-time cost (tens of seconds for thousands of
-     reactions) — expected, not a hang.
-   - A heavy stimulus/drive phase is the expensive part — keep it short or skip it.
-   - If the solver crashes at setup/first step, retry with a more robust solver (well-mixed:
-     `Wmdirect` instead of `Wmrssa`) to tell a **model** bug from a **solver/version** issue,
-     and report which it was.
-4. **Report.** Pass = "built + stepped N s, counts evolve, no exception." Fail = the first
-   exception with its fix (e.g. *Wmrssa asserts on 5.1 → use Wmdirect*, or the real model
-   bug). Fold it into the validation report as an **Execution** line. A smoke-test confirms
-   the model **runs**, not that it is scientifically correct — that is still semantic +
-   literature.
-
 ## Semantic review (beyond static linting)
 
 The validator catches mechanical errors; some bugs need a **read of the model's
@@ -437,6 +400,42 @@ report), **ask the modeler for permission before modifying the script** — list
 exact fixes you propose and wait for a yes. This applies to every tier (lint, semantic,
 literature). **If the modeler declines, stop at the report** — leave the script
 untouched. Only apply fixes you've been explicitly cleared to make.
+
+## Execution smoke-test (optional final gate — only on request)
+
+**The skill does not depend on STEPS.** Static lint + semantic + literature are the
+validation; they need nothing installed. This is a *bonus* tier, last and entirely
+optional: actually running the model in STEPS to confirm it builds and steps. It is **not
+a gate that judges the model** — a runtime failure is often **version-specific, not a
+script error** (a STEPS-3.x model can hit a Wmrssa `cur_node < max_node` assertion under
+5.1 yet be perfectly correct; the remedy is "run it on the STEPS version it targets," not
+"edit the script"). So never let a failed run condemn an otherwise-clean model, and never
+treat STEPS as required.
+
+Order matters — **ask first, only then touch the environment:**
+
+1. **Offer it (after the static/semantic/literature report).** *"Want me to also run the
+   model in STEPS as a final check that it builds and steps? (optional — needs STEPS
+   installed)."* Do **not** probe for STEPS as part of the normal flow, and skip the offer
+   under CI / non-interactive.
+2. **Only on yes, detect.** `validate_steps_script.py --check-env` (exit 0 + version if
+   STEPS imports, exit 2 otherwise) — run it with the interpreter where STEPS lives, often
+   a venv (`~/steps_venv/bin/python ... --check-env`). If STEPS isn't found, say so and
+   stop (suggest the modeler point you at their STEPS env or the version the model targets);
+   do not install anything.
+3. **Short run, not the full protocol.** Build model + geometry, create the solver the
+   script uses, set its initial conditions, run a **few sim-seconds** — enough to clear
+   solver setup and a handful of steps; cut time / iterations / pulses aggressively (the
+   goal is "builds and steps," not results). Notes from real runs: solver setup for a big
+   network is a one-time cost (tens of seconds for thousands of reactions); a heavy
+   stimulus phase is the expensive part — keep it short. If the solver asserts at
+   setup/first step, retry a more robust solver (well-mixed: `Wmdirect` for `Wmrssa`) — if
+   that runs, it was a **solver/version** issue, not a model bug, and that's the headline.
+4. **Report it as what it is.** An *Execution* line: "ran N s on STEPS x.y, no exception"
+   (pass), or the first exception **labelled** model-bug vs version/solver issue with the
+   remedy. A pass confirms the model **runs**; it says nothing about scientific correctness
+   (still semantic + literature). A version-specific failure is a note, **not** a finding
+   against the model.
 
 ## Maintaining this skill
 
