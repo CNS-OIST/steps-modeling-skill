@@ -527,6 +527,21 @@ def _api1_notice(lines):
              "(the skill does this)")]
 
 
+def _code_only(ln):
+    """Drop a trailing `# comment` from one line, ignoring '#' inside quotes, so code-matching
+    scans never fire on commented-out statements. Single-line; not for multi-line strings."""
+    quote = None
+    for i, c in enumerate(ln):
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in ("'", '"'):
+            quote = c
+        elif c == "#":
+            return ln[:i]
+    return ln
+
+
 def _reusability_checks(src):
     """Advisory only (never fail), and INTRINSIC: every signal is read from the script
     itself — no reference model / ground truth required, so it runs on ANY STEPS script.
@@ -541,7 +556,8 @@ def _reusability_checks(src):
     #    API_2: `<spec>.Clamped = True`; API_1: `sim.setCompClamped('c','X',True)` (and Patch/Tet/
     #    Tri/ROI variants). Species clamps only — voltage clamps (setVertVClamped/.VClamped) are a
     #    boundary condition, not a reservoir, so they're deliberately excluded.
-    clamps = [i for i, ln in enumerate(lines, 1)
+    clamps = [i for i, raw in enumerate(lines, 1)
+              for ln in [_code_only(raw)]
               if re.search(r"\bClamped\s*=\s*True\b", ln)
               or re.search(r"\.set(Comp|Patch|Tet|Tri|ROI)Clamped\s*\([^)]*\bTrue\b", ln)]
     if clamps:
@@ -553,8 +569,12 @@ def _reusability_checks(src):
             "as finite species so the model rescales / spatialises correctly"))
     # 2) Effective enzyme kinetics linearised as k_eff = kcat/Km — exact only when [S] << Km.
     #    Both [S] (counts & volume) and Km live in the script, so the regime is checkable here.
-    for i, ln in enumerate(lines, 1):
-        if re.search(r"(?i)k_?eff\s*=\s*kcat\s*/\s*k_?m|kcat\s*/\s*k_?m\b", ln):
+    for i, raw in enumerate(lines, 1):
+        if raw.lstrip().startswith("#"):   # whole statement disabled — not a live smell
+            continue
+        # NB: read the full line (code + annotation) — the smell is usually in a comment
+        # like `K = kcat/Km  # k_eff` since bare arithmetic can't reveal it.
+        if re.search(r"(?i)k_?eff\s*=\s*kcat\s*/\s*k_?m|kcat\s*/\s*k_?m\b", raw):
             out.append(("WARNING", i,
                 "reusability: enzyme kinetics linearised as k_eff=kcat/Km — exact only when "
                 "[S]<<Km. If [S]≳Km it overestimates turnover and ignores saturation, and the "
@@ -654,6 +674,15 @@ def _selftest():
     assert any("reservoir" in p for _, _, p, _ in
                _reusability_checks("sim.setCompClamped('vsys','NO',True)\n")), "API_1 clamp missed"
     assert not _reusability_checks("sim.setVertVClamped(v, True)\n"), "voltage clamp wrongly flagged"
+    # commented-OUT smells must NOT be flagged (whole statement disabled)
+    assert not _reusability_checks("#sim.cyto.Ca.Clamped = True\n"), "commented clamp wrongly flagged"
+    assert not _reusability_checks("  # k_eff = kcat/Km (disabled)\n"), "commented kcat wrongly flagged"
+    # but an ANNOTATED live line keeps the kcat smell (the marker lives in the comment by design)
+    assert any("kcat/Km" in p for _, _, p, _ in
+               _reusability_checks("K = 0.6/7.8e-6  # k_eff = kcat/Km\n")), "annotated kcat missed"
+    # a '#' inside a string must not be mistaken for a comment (clamp still detected)
+    assert any("reservoir" in p for _, _, p, _ in
+               _reusability_checks("sim.LIST('a#b').Ca.Clamped = True\n")), "string-# broke clamp scan"
     # --params extraction picks up scheme, rate, diffusion, and initial condition
     pp = extract_params("A + B <r['bind']> C\nr['bind'].K = 1e6, 0.7  # Smith 2020\n"
                         "Diffusion(Ca, 2e-10)\nsim.cyt.Ca.Conc = 150e-6\n")
