@@ -195,6 +195,7 @@ and the name string: `sim`/`mesh.tetGroups[(0, 'cytosol')]`, `mesh.triGroups[(0,
 | geometry setup is O(n²) / a list is recomputed | a `for x in seq:` whose body ignores `x` and rebuilds a comprehension over `seq` | drop the stray loop; compute the comprehension once |
 | pulse train behaves as a constant input (no gaps) | pulse duration ≥ inter-pulse interval (1/freq) — fixed-width pulses reused at higher frequency overlap | ensure `duration < 1/freq` per frequency; narrow the pulse at high freq (e.g. 80 ms @ 10 Hz vs 200 ms) |
 | a reaction silently never fires | no rate set — API_2 `r['k']` with no `.K`, or API_1 `smodel.Reac(...)` with no `.kcst` (incl. the `Reac1 = 8` clobber typo writing the var instead of `Reac1.kcst = 8`); rate defaults to 0 | set the rate (`.K` / `.kcst`), or a dynamic `set*ReacK('name', ...)`; the linter flags this for **both** APIs |
+| concentration / diffusion off by 10³–10⁹ | wrong units — Conc is molar (`150e-6`, not `150`), Diff/dcst is m²/s (`2e-10`, not `2e2` µm²/s); applies to API_2 (`.Conc`, `Diffusion`) **and** API_1 (`set*Conc`, `smodel.Diff(... dcst)`) | the linter flags both dialects; reserved single-cap names, though, are an API_2-only collision (`sim.comp.A` vs `Area`) — fine in API_1's string keys |
 
 ## API_1 → API_2 conversion
 
