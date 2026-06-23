@@ -159,6 +159,95 @@ def _reaction_checks(src):
     return out
 
 
+def _api1_reaction_checks(lines):
+    """API_1 rate completeness — version-AGNOSTIC concept, API_1 spelling.
+    Every `var = smodel.Reac/SReac('name', ...)` needs a matching `var.kcst = ...`
+    (or a dynamic `set*ReacK('name', ...)`); otherwise the rate defaults to 0 and the
+    reaction never fires. Also catches the `var = <number>` clobber typo (writing
+    `Reac1 = 8` instead of `Reac1.kcst = 8`, which silently replaces the reaction
+    object). This is the API_1 counterpart of the API_2 `r['k'].K` unset-rate check —
+    the same bug, so it runs for API_1 too rather than waiting for a conversion."""
+    out = []
+    re_reac = re.compile(r"^\s*(\w+)\s*=\s*\w+\.(S?Reac)\(\s*'([^']*)'")
+    re_kcst = re.compile(r"^\s*(\w+)\.\s*kcst\s*=")
+    re_clobber = re.compile(r"^\s*(\w+)\s*=\s*[-+]?[0-9.][-+0-9.eE]*\s*(?:#.*)?$")
+    re_setk = re.compile(r"set\w*Reac\w*K\s*\(([^)]*)\)")
+    defined, has_rate, clobbered, dyn = {}, set(), {}, set()
+    for i, ln in enumerate(lines, 1):
+        m = re_reac.match(ln)
+        if m:
+            defined[m.group(1)] = (i, m.group(3))
+            continue
+        m = re_kcst.match(ln)
+        if m:
+            has_rate.add(m.group(1))
+            continue
+        m = re_clobber.match(ln)
+        if m:
+            clobbered[m.group(1)] = i        # var reassigned to a bare number
+        for mk in re_setk.finditer(ln):       # dynamic rate by reaction NAME string
+            dyn.update(re.findall(r"'([^']*)'", mk.group(1)))
+    for var, (line, name) in defined.items():
+        if var in has_rate or name in dyn:
+            continue
+        if var in clobbered:
+            out.append(("WARNING", clobbered[var],
+                        f"`{var} = <number>` overwrites reaction '{name}' instead of setting its rate",
+                        f"use `{var}.kcst = <rate>` — as written, '{name}' keeps the default rate 0 "
+                        "and never fires"))
+        else:
+            out.append(("WARNING", line,
+                        f"reaction '{name}' ({var}) has no rate constant — defaults to 0, never fires",
+                        f"set it: `{var}.kcst = <rate>` (or a dynamic `set*ReacK('{name}', ...)`)"))
+    return out
+
+
+_CONC_SETTER = re.compile(r"^set(Comp|Patch|Tet|Tri|ROI|Vert)Conc$")
+
+
+def _dcst_issue(v, lineno):
+    if v is None or 1e-15 <= v <= 1e-8:
+        return None
+    fix = ("a µm²/s value? multiply by 1e-12 → m²/s" if v > 1e-8
+           else "use m²/s, e.g. Ca ≈ 2e-10, a protein ≈ 1e-11")
+    return ("WARNING", lineno,
+            f"diffusion dcst {v:g} m²/s outside the cytosolic range ~1e-13–1e-9", fix)
+
+
+def _api1_scale_checks(tree):
+    """Units / biological scale for API_1 spellings — the AGNOSTIC half of _scale_checks.
+    `set*Conc(...)` values are MOLAR; the `Diff` dcst is m²/s. (The API_2-shaped `.Conc =`,
+    `Diffusion(...)`, and `LoadGmsh(scale=)` reads are handled by `_scale_checks`; reserved
+    single-capital names are genuinely API_2-only — they collide with Area/Volume/etc. in the
+    attribute-path DSL, not in API_1's string-keyed `getCompConc('c','A')`.)"""
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            fn = node.func.attr if isinstance(node.func, ast.Attribute) else \
+                (node.func.id if isinstance(node.func, ast.Name) else "")
+            if _CONC_SETTER.match(fn) and node.args and (v := _num(node.args[-1])) is not None:
+                if v > 1.0:
+                    out.append(("WARNING", node.lineno, f"{fn}(...) = {v:g} M is non-physiological",
+                                "Conc is molar (mol/L): write 150 µM as `150e-6`"))
+                elif 0 < v < 1e-11:
+                    out.append(("WARNING", node.lineno, f"{fn}(...) = {v:g} M is below ~10 pM",
+                                "check units — Conc is mol/L, not mol/m³"))
+                elif v < 0:
+                    out.append(("WARNING", node.lineno, f"{fn}(...) = {v:g} M is negative",
+                                "set a non-negative molar concentration (0 clears the species)"))
+            if fn == "Diff":                       # smodel.Diff(name, vsys, spec, dcst) / dcst=
+                dv = _num(node.args[3]) if len(node.args) >= 4 else None
+                if dv is None:
+                    dv = next((_num(k.value) for k in node.keywords if k.arg == "dcst"), None)
+                if (issue := _dcst_issue(dv, node.lineno)):
+                    out.append(issue)
+        if isinstance(node, ast.Assign):           # diffObj.dcst = <value>
+            for t in node.targets:
+                if isinstance(t, ast.Attribute) and t.attr == "dcst" and (issue := _dcst_issue(_num(node.value), node.lineno)):
+                    out.append(issue)
+    return out
+
+
 def _num(node):
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
         return float(node.value)
@@ -430,10 +519,12 @@ def _api1_notice(lines):
     """API_1 is valid, not an error — emit ONE advisory note, not one error per marker."""
     line = next((i for i, ln in enumerate(lines, 1) if re.search(r"\bsteps\.", ln)), 1)
     return [("WARNING", line,
-             "API_1 (legacy steps.* interface) script — valid; the API_2-specific checks are "
-             "skipped here (only API-agnostic geometry/loop checks run)",
-             "API_1 syntax is not an error; to get full structural + unit validation, convert "
-             "to API_2 (the skill does this)")]
+             "API_1 (legacy steps.* interface) script — valid; only the API-VERSION-SPECIFIC checks "
+             "are skipped here (.Create source-line, newRun/run ordering, reserved single-cap names). "
+             "API-agnostic checks run: geometry/loop traps, reaction rate-completeness, and unit/scale "
+             "(set*Conc molar, Diff dcst m²/s)",
+             "API_1 syntax is not an error; conversion to API_2 adds only the API_2-shaped checks "
+             "(the skill does this)")]
 
 
 def validate_source(src):
@@ -446,9 +537,12 @@ def validate_source(src):
     agnostic = _comprehension_checks(tree) + _loop_checks(tree) + _geometry_checks(tree)
     if _is_api1(lines):
         # Pure API_1: its syntax is valid, so don't report it as errors — note it, then run
-        # only the checks that apply regardless of API. (newRun/run, r[].K, .Create, scale=
-        # are all API_2-shaped and would misfire on API_1.)
-        issues = _api1_notice(lines) + agnostic
+        # every check whose CONCEPT is API-agnostic. Rate-completeness is one of those (the
+        # API_2 `r[].K` check has an API_1 counterpart, `_api1_reaction_checks`), so it runs
+        # here too rather than waiting for a conversion. Only genuinely version-specific checks
+        # (.Create source-line, newRun/run ordering, the API_2-shaped scale= reads) are skipped.
+        issues = (_api1_notice(lines) + agnostic + _api1_reaction_checks(lines)
+                  + _api1_scale_checks(tree))
     else:
         issues = (_import_checks(lines) + _ast_checks(tree) + _flow_checks(lines)
                   + _reaction_checks(src) + _scale_checks(tree) + agnostic)
@@ -529,6 +623,36 @@ def _selftest():
     assert not any(s == "ERROR" for s, *_ in a1), f"API_1 must not be errors: {a1}"
     assert any("API_1" in p for _, _, p, _ in a1), "API_1 should be noted"
     assert any("rarely matches" in p for _, _, p, _ in a1), "agnostic checks must still run on API_1"
+    # API_1 rate-completeness (the ModelDB 245412 bug): a reaction with no .kcst never fires;
+    # the `Rx = <number>` clobber typo is the sharper case. A reaction WITH a rate, or one whose
+    # rate is set dynamically via set*ReacK by name, must NOT be flagged.
+    rc = validate_source(
+        "import steps.model as smod\n"
+        "R1 = smod.Reac('Reac1', vsys, lhs=[A], rhs=[B])\n"      # missing kcst -> flag
+        "R2 = smod.Reac('Reac2', vsys, lhs=[B], rhs=[A])\n"
+        "R2.kcst = 8\n"                                          # has rate -> ok
+        "R3 = smod.SReac('pump', s, slhs=[P], srhs=[Q])\n"
+        "R3 = 8\n"                                               # clobber typo -> flag
+        "R4 = smod.Reac('Cainflux', vsys, rhs=[A])\n"
+        "sim.setCompReacK('vsys', 'Cainflux', 1.5e-3)\n")        # dynamic rate by name -> ok
+    rcp = [p for _, _, p, _ in rc]
+    assert any("'Reac1'" in p and "never fires" in p for p in rcp), f"missing-kcst not caught: {rc}"
+    assert any("overwrites reaction 'pump'" in p for p in rcp), f"clobber typo not caught: {rc}"
+    assert not any("'Reac2'" in p for p in rcp), "reaction with a rate wrongly flagged"
+    assert not any("Cainflux" in p and "never fires" in p for p in rcp), "dynamic-rate reaction wrongly flagged"
+    # API_1 unit/scale (agnostic): set*Conc is molar; Diff dcst is m²/s. Same bug as API_2,
+    # flagged without conversion. A µM-range Conc and a real dcst must NOT be flagged.
+    sc = validate_source(
+        "import steps.model as smod\n"
+        "sim.setCompConc('cyt', 'Ca', 150)\n"            # 150 M -> non-physiological
+        "sim.setCompConc('cyt', 'Buf', 50e-6)\n"         # 50 µM -> ok
+        "d = smod.Diff('d', vsys, Ca, 100)\n"            # 100 m²/s -> µm²/s mistake
+        "d.dcst = 2e-10\n")                              # ok (overrides... still a valid value)
+    scp = [p for _, _, p, _ in sc]
+    assert any("150" in p and "non-physiological" in p for p in scp), f"molar Conc not caught: {sc}"
+    assert any("100" in p and "dcst" in p for p in scp), f"dcst µm²/s mistake not caught: {sc}"
+    assert not any("5e-05" in p for p in scp), "µM-range Conc wrongly flagged"  # 50e-6 = 5e-05 M
+    assert not any("2e-10" in p for p in scp), "valid dcst wrongly flagged"
     # API_1 markers WITH an interface import = unsafe mixing → a WARNING recommending API_2,
     # NOT an error (and not the pure-API_1 advisory either)
     mix = validate_source("import steps.interface\nimport steps.model as smod\n")

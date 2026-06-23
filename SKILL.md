@@ -170,10 +170,25 @@ solver methods. If the input is API_1:
    Keep the original untouched as the reference of record.
 3. **If no** — validate the original as it is. The lint **does not flag API_1 syntax as
    errors** (API_1 is valid, just legacy): it detects the script is API_1, emits one
-   advisory note, and runs the API-agnostic checks (geometry/loop/comprehension traps).
-   The API_2-specific checks (rate-set, `newRun`/`run` ordering, units/scale, `.Create()`)
-   are skipped because they're API_2-shaped — so **converting still buys fuller
-   validation**, but a clean API_1 script reports clean.
+   advisory note, and runs every check whose **concept is API-agnostic**:
+   geometry/loop/comprehension traps, **reaction rate-completeness** (a reaction with no rate
+   defaults to 0 and never fires — for API_1, a missing `.kcst` or the `Rx = <number>` clobber
+   typo, the counterpart of the API_2 `r[..].K` unset-rate check), and **unit/scale** (`set*Conc`
+   values are molar; the `Diff` dcst is m²/s). Only the **genuinely version-specific** checks are
+   skipped: `.Create()` source-line magic, `newRun`/`run` ordering, the API_2-shaped `.Conc =` /
+   `Diffusion(...)` / `LoadGmsh(scale=)` reads, and **reserved single-capital names** (`A`, `V`, …
+   collide with `Area`/`Volume` in API_2's *attribute-path* DSL — `sim.comp.A`; API_1's
+   string-keyed `getCompConc('comp','A')` has no such collision, so it is *not* an API_1 issue).
+   A clean API_1 script reports clean.
+
+   **Principle: a check the API_2 path runs should also run for API_1 unless it is genuinely
+   API-version-specific.** A bug like an unset rate or a 150 M concentration is the same bug in
+   both dialects; don't make the modeler convert just to surface it. When you add an API_2 check,
+   ask whether its *concept* is agnostic — if so, give it an API_1 spelling too (as
+   `_api1_reaction_checks` and `_api1_scale_checks` do) rather than leaving it behind the
+   conversion gate. The test for "skip on API_1" is **"is this about API_2 syntax/semantics
+   specifically?"** (`.Create`, run-ordering, attribute-path name collisions) — not merely
+   "is the check currently written against API_2 spelling?"
 
    (API_1 markers in a file that *also* `import steps.interface` are **API_1↔2 mixing** —
    not a pure API_1 script. That gets a **warning** for unsafe practice recommending a full
