@@ -605,6 +605,25 @@ def _reusability_checks(src):
                 "note which output was fit and at what operating point; reuse outside that envelope "
                 "(perturbation, rescale, coupling) needs re-fitting, not just reuse"))
             break
+    # 4) Michaelis-Menten rendered as an explicit clamped pseudo-enzyme ES-complex (E+S<->ES->E+P,
+    #    the approach #2 suggests). Exact DETERMINISTICALLY, but a STOCHASTIC run at low enzyme copy
+    #    number departs from the MM rate law: scaling kcat (a perturbation) breaks the quasi-steady-
+    #    state margin, while raising the enzyme copy to compensate sequesters substrate into ES (grows
+    #    with copy) — no copy-number setting fixes both, so high-turnover perturbations come out biased
+    #    low. Signature: a species clamp (#1) co-occurring with an explicit-ES / MM-idiom marker.
+    _es = re.compile(r"(?i)pseudo.?enz|ES.?.?complex|rapid.?equilib|michaelis|henri")
+    if clamps:
+        es = [i for i, raw in enumerate(lines, 1) if _es.search(raw)]
+        if es:
+            out.append(("WARNING", es[0],
+                "reusability: Michaelis-Menten via an explicit clamped pseudo-enzyme ES-complex. Exact "
+                "deterministically, but a STOCHASTIC run at low enzyme copy number departs from the MM "
+                "rate law — scaling kcat (a perturbation) breaks the quasi-steady-state margin, and "
+                "raising the enzyme copy to compensate sequesters substrate into ES (grows with copy); "
+                "no copy-number setting fixes both, so high-turnover perturbations come out biased low",
+                "for exact perturbation magnitudes use the deterministic solver; for the SSA report "
+                "ensemble means and read extreme-perturbation magnitudes as bounds — or use a saturating "
+                "QSS/Hill rate (VDepRate) instead of an explicit ES complex"))
     return out
 
 
@@ -695,6 +714,14 @@ def _selftest():
     # a '#' inside a string must not be mistaken for a comment (clamp still detected)
     assert any("reservoir" in p for _, _, p, _ in
                _reusability_checks("sim.LIST('a#b').Ca.Clamped = True\n")), "string-# broke clamp scan"
+    # 4) explicit clamped pseudo-enzyme ES-complex MM -> stochastic low-copy advisory (needs clamp + idiom)
+    assert any("pseudo-enzyme ES-complex" in p for _, _, p, _ in _reusability_checks(
+        "E.Clamped = True\nr['b'].K = 1e9, 7700  # rapid-equilibrium pseudo-enzyme ES-complex (Michaelis-Menten)\n"
+    )), "ES-complex MM advisory missed"
+    assert not any("pseudo-enzyme ES-complex" in p for _, _, p, _ in
+                   _reusability_checks("E.Clamped = True\nr['b'].K = 1e6\n")), "ES advisory fired without the ES idiom"
+    assert not any("pseudo-enzyme ES-complex" in p for _, _, p, _ in
+                   _reusability_checks("r['b'].K = 1e9  # Michaelis-Menten\n")), "ES advisory fired without a clamp"
     # --params extraction picks up scheme, rate, diffusion, and initial condition
     pp = extract_params("A + B <r['bind']> C\nr['bind'].K = 1e6, 0.7  # Smith 2020\n"
                         "Diffusion(Ca, 2e-10)\nsim.cyt.Ca.Conc = 150e-6\n")

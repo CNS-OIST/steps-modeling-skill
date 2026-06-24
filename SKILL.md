@@ -433,6 +433,17 @@ published output. Treat them as prompts and walk this checklist:
   - A **well-mixed model standing in for a spatial one** (zones encoded as species suffixes,
     diffusion written as first-order reactions) reproduces the bulk curve but cannot be
     spatialised as-is — note it.
+  - **MM as an explicit clamped pseudo-enzyme ES-complex** (`E+S⇌ES→E+P`, the saturating fix #2
+    above suggests) is the *opposite* trap **in a stochastic run at low enzyme copy number**
+    (enzymes are often only a handful of molecules in a spine/vesicle volume). It's exact
+    deterministically, but the SSA departs from the MM rate law: scaling `kcat` for a
+    perturbation breaks the quasi-steady-state margin (`kon·[E] ≫ kcat` fails), and raising the
+    enzyme copy to restore it **sequesters substrate into ES** (∝ enzyme copy) — no copy-number
+    setting fixes both, so **high-turnover perturbations come out biased low** while basal/
+    deep-saturation conditions look fine. The validator flags this (clamp + ES/MM idiom). For
+    exact perturbation magnitudes use the **deterministic** solver; for the SSA report **ensemble
+    means over N trials** and treat extreme-perturbation magnitudes as bounds — or use a
+    saturating QSS/Hill rate (`VDepRate`) rather than an explicit ES complex.
 - **Calibration smells.** Parameters tuned to *hit an output* (env-var knobs, fudge factors,
   uncited round numbers, a comment like "reproduces the paper's ~56 %") bound the reuse
   envelope. The danger is **compensating errors**: several approximations that cancel only
