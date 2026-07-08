@@ -56,6 +56,8 @@ model's meaning, the outside world, and finally whether the model survives reuse
 │    import order, API_1↔2 mixing, .Create() misuse, reserved names,   │
 │    units/scale (Conc molar, D in m²/s, mesh scale=), run ordering,   │
 │    unset rates, + statically-detectable semantic traps               │
+│    + general-Python correctness lint via ruff (SIM222/3 always-true  │
+│      booleans, E711/2 ==None/==True, B006 mutable defaults, …)       │
 │    → ERROR / WARNING, each with a concrete fix                       │
 └─────────────────────────────────────────────────────────────────────┘
       │  passes

@@ -19,11 +19,21 @@ Each issue is (severity, line, problem, fix). Exit 0 if no ERRORs, 1 otherwise;
 WARNINGs never fail the run.
 """
 import ast
+import json
 import pathlib
 import re
+import subprocess
 import sys
 
 RESERVED = {"A", "V", "D", "I", "Ves", "Raft", "Vesicle"}   # reserved object names
+
+# General-Python correctness lint (Tier-1), delegated to ruff. The STEPS-specific checks below
+# only know STEPS semantics; ruff already encodes the general logic traps a STEPS linter shouldn't
+# reinvent -- always-true/false booleans (SIM222/223, e.g. `x == 'a' or 'b'`), ==None/==True
+# (E711/E712), mutable defaults (B006), etc. Style rules are deliberately excluded, and star-import
+# noise (F403/F405/F401) and throwaway binds (F841) are ignored since STEPS scripts use them idiomatically.
+_RUFF_SELECT = "F,E711,E712,E713,E714,SIM222,SIM223,B002,B006,B015,B018,PLE,PLW0177,PLW0128"
+_RUFF_IGNORE = "F403,F405,F401,F841"
 STEPS_SUBMODS = "model|geom|sim|rng|saving|interface|visual"
 LOADERS = ("LoadGmsh", "LoadAbaqus", "LoadTetGen", "LoadVTK")
 
@@ -651,8 +661,31 @@ def validate_source(src):
     return sorted(issues, key=lambda x: (x[1], x[0]))
 
 
+def _ruff_checks(path):
+    """General-Python correctness lint via ruff (complements the STEPS-domain checks).
+    No-op with a one-line advisory if ruff isn't installed; never raises."""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "ruff", "check", "--select", _RUFF_SELECT,
+             "--ignore", _RUFF_IGNORE, "--output-format", "json", "--force-exclude", str(path)],
+            capture_output=True, text=True)
+        data = json.loads(r.stdout or "[]")
+    except Exception:
+        return [("WARNING", 0, "general-Python lint skipped (ruff not available)",
+                 "pip install ruff to enable the correctness lint pass")]
+    out = []
+    for d in data:
+        line = (d.get("location") or {}).get("row", 0)
+        code = d.get("code") or "ruff"
+        out.append(("WARNING", line, f"[{code}] {d.get('message', '').strip()}",
+                    "general-Python correctness lint (ruff) — fix the flagged logic issue"))
+    return out
+
+
 def validate(path):
-    return validate_source(pathlib.Path(path).read_text())
+    # Tier-1 = STEPS-domain static checks (source) + general-Python correctness lint (ruff, file).
+    issues = validate_source(pathlib.Path(path).read_text()) + _ruff_checks(path)
+    return sorted(issues, key=lambda x: (x[1], x[0]))
 
 
 def _selftest():
@@ -806,6 +839,15 @@ def _selftest():
         open(os.path.join(d, "__pycache__", "cached.py"), "w").close()
         ex = _expand([d, "literal.py"])
         assert ex == [os.path.join(d, "model.py"), "literal.py"], ex
+    # general-Python lint pass (ruff): the always-true `x == 'a' or 'b'` trap must be caught
+    # when ruff is installed; when it isn't, the pass degrades to a single skip advisory.
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "bug.py")
+        open(f, "w").write("def g(x):\n    if x == 'a' or 'b':\n        return 1\n    return 0\n")
+        rf = _ruff_checks(f)
+        assert all(len(t) == 4 and t[0] == "WARNING" for t in rf), rf
+        blob = " ".join(p for _, _, p, _ in rf).lower()
+        assert ("sim222" in blob) or ("ruff not available" in blob), f"ruff pass unexpected: {rf}"
     print("selftest OK")
 
 
