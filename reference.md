@@ -103,8 +103,9 @@ sim.ER.Ca.Clamped = True              # hold concentration fixed
 sim.memb.R.Count = 160
 sim.TET(centerTet).Ca.Count = 1000    # inject into one tetrahedron
 sim.MATCH('AZ.*').Dock.Count = 200    # set on every region whose name matches
-sim.cyt.LIST(*names).Count = 1000     # LIST/MATCH also take plain name strings —
-sums = sim.cyt.MATCH('SB.*').Count    # the way to reach loop-created objects
+sim.cyt.MATCH('SB.*').Count = 1000    # LIST/MATCH take plain name strings too:
+counts = sim.cyt.LIST(*names).Count   # how to reach loop-created objects
+total  = sum(counts)                  # a read gives the list of values, not a sum
 sim.run(1.0)                          # advance to t = 1 s (absolute)
 ```
 
