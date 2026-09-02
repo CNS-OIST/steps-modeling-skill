@@ -56,6 +56,13 @@ there's no network.
    ("does not match the expected format for automatic assignment"). To create
    objects programmatically (e.g. one ROI per region in a loop), call the
    **constructor with `name=`** instead: `ROI(triList, name=regionName)`.
+   Address them again through `LIST`/`MATCH`, which take **names as strings** —
+   never `getattr(sim.comp, f'S{i}')`:
+   ```python
+   Species(name=f'SA{i}')                                     # built in a loop
+   sim.comp.LIST(*[f'SA{i}' for i in range(n)]).Count = 1e5   # set all of them
+   fired = sim.comp.MATCH('SB.*').Count                       # read all matching
+   ```
 
 4. **Reactions live in a `with` block and use a ReactionManager `r`.**
    ```python
