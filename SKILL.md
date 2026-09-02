@@ -62,7 +62,7 @@ there's no network.
    Species(name=f'SA{i}')                       # built in a loop
    sim.comp.MATCH('SA.*').Count = 1e5           # set every name that matches
    sim.comp.LIST(*names).Count = 1e5            # or an explicit list of names
-   fired = sim.comp.MATCH('SB.*').Count         # a read gives the list of values
+   SB_counts = sim.comp.MATCH('SB.*').Count     # a read gives the list of values
    ```
 
 4. **Reactions live in a `with` block and use a ReactionManager `r`.**
